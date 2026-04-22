@@ -4,10 +4,11 @@ import pool from './pool';
 async function seed() {
   console.log('Encriptando contrasenas...');
 
-  const usuarios = [
+const usuarios = [
     { usuario: 'admin',       password: 'admin123'  },
     { usuario: 'laura.perez', password: 'laura123'  },
     { usuario: 'carlos.ruiz', password: 'carlos123' },
+    { usuario: 'admin2',      password: 'admin2123' },
   ];
 
   for (const u of usuarios) {
