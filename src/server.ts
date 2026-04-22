@@ -7,20 +7,24 @@ dotenv.config();
 import pool from './db/pool';
 import authRoutes  from './routes/auth.routes';
 import citasRoutes from './routes/citas.routes';
+import usersRoutes from './routes/users.routes';
+import pacientesRoutes from './routes/pacientes.routes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use('/api/pacientes', pacientesRoutes);
+// Middlewares primero — siempre antes de las rutas
 app.use(cors({
   origin: 'http://localhost:5173',
   credentials: true,
 }));
-
 app.use(express.json());
 
-// Rutas
+// Rutas despues de los middlewares
 app.use('/api/auth',  authRoutes);
 app.use('/api/citas', citasRoutes);
+app.use('/api/users', usersRoutes);
 
 // Health checks
 app.get('/api/health', (req, res) => {
@@ -39,6 +43,7 @@ app.get('/api/health/db', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
 process.on('uncaughtException', (err) => {
   console.error('Error no capturado:', err);
 });
