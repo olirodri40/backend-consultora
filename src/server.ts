@@ -4,8 +4,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Importar pool — esto activa la conexion con PostgreSQL al arrancar
 import pool from './db/pool';
+import authRoutes from './routes/auth.routes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,28 +17,20 @@ app.use(cors({
 
 app.use(express.json());
 
+// Rutas
+app.use('/api/auth', authRoutes);
+
+// Health check
 app.get('/api/health', (req, res) => {
-  res.json({
-    ok: true,
-    mensaje: 'Servidor funcionando correctamente',
-    timestamp: new Date().toISOString(),
-  });
+  res.json({ ok: true, mensaje: 'Servidor funcionando' });
 });
 
-// Ruta para verificar conexion con la base de datos
 app.get('/api/health/db', async (req, res) => {
   try {
     const resultado = await pool.query('SELECT NOW() as tiempo');
-    res.json({
-      ok: true,
-      mensaje: 'Base de datos conectada',
-      tiempo: resultado.rows[0].tiempo,
-    });
-  } catch (error) {
-    res.status(500).json({
-      ok: false,
-      mensaje: 'Error conectando a la base de datos',
-    });
+    res.json({ ok: true, tiempo: resultado.rows[0].tiempo });
+  } catch {
+    res.status(500).json({ ok: false, mensaje: 'Error de base de datos' });
   }
 });
 
