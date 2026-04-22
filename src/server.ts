@@ -5,7 +5,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import pool from './db/pool';
-import authRoutes from './routes/auth.routes';
+import authRoutes  from './routes/auth.routes';
+import citasRoutes from './routes/citas.routes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,9 +19,10 @@ app.use(cors({
 app.use(express.json());
 
 // Rutas
-app.use('/api/auth', authRoutes);
+app.use('/api/auth',  authRoutes);
+app.use('/api/citas', citasRoutes);
 
-// Health check
+// Health checks
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, mensaje: 'Servidor funcionando' });
 });
@@ -36,4 +38,7 @@ app.get('/api/health/db', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Error no capturado:', err);
 });
