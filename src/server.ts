@@ -11,7 +11,8 @@ import usersRoutes     from './routes/users.routes';
 import pacientesRoutes from './routes/pacientes.routes';
 import zumbaRoutes     from './routes/zumba.routes';
 import gerontoRoutes from './routes/geronto.routes';
-
+import reportesRoutes from './routes/reportes.routes';
+;
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -29,6 +30,7 @@ app.use('/api/users',     usersRoutes);
 app.use('/api/pacientes', pacientesRoutes);
 app.use('/api/zumba',     zumbaRoutes);
 app.use('/api/geronto', gerontoRoutes);
+app.use('/api/reportes', reportesRoutes)
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, mensaje: 'Servidor funcionando' });
