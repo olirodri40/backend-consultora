@@ -5,28 +5,31 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import pool from './db/pool';
-import authRoutes  from './routes/auth.routes';
-import citasRoutes from './routes/citas.routes';
-import usersRoutes from './routes/users.routes';
+import authRoutes      from './routes/auth.routes';
+import citasRoutes     from './routes/citas.routes';
+import usersRoutes     from './routes/users.routes';
 import pacientesRoutes from './routes/pacientes.routes';
+import zumbaRoutes     from './routes/zumba.routes';
+import gerontoRoutes from './routes/geronto.routes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use('/api/pacientes', pacientesRoutes);
-// Middlewares primero — siempre antes de las rutas
+// MIDDLEWARES PRIMERO - siempre antes de las rutas
 app.use(cors({
   origin: 'http://localhost:5173',
   credentials: true,
 }));
 app.use(express.json());
 
-// Rutas despues de los middlewares
-app.use('/api/auth',  authRoutes);
-app.use('/api/citas', citasRoutes);
-app.use('/api/users', usersRoutes);
+// RUTAS DESPUES de los middlewares
+app.use('/api/auth',      authRoutes);
+app.use('/api/citas',     citasRoutes);
+app.use('/api/users',     usersRoutes);
+app.use('/api/pacientes', pacientesRoutes);
+app.use('/api/zumba',     zumbaRoutes);
+app.use('/api/geronto', gerontoRoutes);
 
-// Health checks
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, mensaje: 'Servidor funcionando' });
 });
