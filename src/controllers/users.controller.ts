@@ -350,3 +350,42 @@ export async function getAuditLog(
     res.status(500).json({ ok: false, mensaje: 'Error al obtener log' });
   }
 }
+export async function getProfesionales(
+  req: RequestConUsuario,
+  res: Response
+): Promise<void> {
+  try {
+    const resultado = await pool.query(
+      `SELECT
+        u.id,
+        u.nombre,
+        u.email,
+        u.telefono,
+        u.especialidad,
+        u.tipo_horario,
+        u.fecha_nac,
+        u.sueldo,
+        u.contrato,
+        u.fecha_ingreso,
+        u.activo,
+        u.created_at,
+        r.nombre as rol,
+        a.nombre as area_nombre,
+        a.emoji  as area_emoji,
+        a.color  as area_color,
+        EXTRACT(YEAR FROM AGE(u.fecha_nac)) as edad,
+        TO_CHAR(u.fecha_nac, 'DD/MM') as cumple_dia_mes
+       FROM users u
+       JOIN roles r ON u.role_id = r.id
+       LEFT JOIN areas a ON u.area_id = a.id
+       WHERE r.nombre IN ('profesional', 'supervisor')
+       AND u.activo = true
+       ORDER BY a.nombre, u.nombre`
+    );
+
+    res.json({ ok: true, profesionales: resultado.rows });
+  } catch (error) {
+    console.error('Error al obtener profesionales:', error);
+    res.status(500).json({ ok: false, mensaje: 'Error al obtener profesionales' });
+  }
+}

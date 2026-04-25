@@ -10,27 +10,29 @@ import citasRoutes     from './routes/citas.routes';
 import usersRoutes     from './routes/users.routes';
 import pacientesRoutes from './routes/pacientes.routes';
 import zumbaRoutes     from './routes/zumba.routes';
-import gerontoRoutes from './routes/geronto.routes';
-import reportesRoutes from './routes/reportes.routes';
-;
+import gerontoRoutes   from './routes/geronto.routes';
+import reportesRoutes  from './routes/reportes.routes';
+import areasRoutes     from './routes/areas.routes';
+import servicesRoutes  from './routes/services.routes';
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// MIDDLEWARES PRIMERO - siempre antes de las rutas
 app.use(cors({
   origin: 'http://localhost:5173',
   credentials: true,
 }));
 app.use(express.json());
 
-// RUTAS DESPUES de los middlewares
 app.use('/api/auth',      authRoutes);
 app.use('/api/citas',     citasRoutes);
 app.use('/api/users',     usersRoutes);
 app.use('/api/pacientes', pacientesRoutes);
 app.use('/api/zumba',     zumbaRoutes);
-app.use('/api/geronto', gerontoRoutes);
-app.use('/api/reportes', reportesRoutes)
+app.use('/api/geronto',   gerontoRoutes);
+app.use('/api/reportes',  reportesRoutes);
+app.use('/api/areas',     areasRoutes);
+app.use('/api/services',  servicesRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, mensaje: 'Servidor funcionando' });
