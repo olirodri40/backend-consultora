@@ -318,7 +318,7 @@ export async function crearActividadGeronto(
       `INSERT INTO geronto_activities
         (nombre, emoji, dia, hora_inicio, hora_fin, color, precio)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [nombre, emoji || '🧓', dia, hora_inicio, hora_fin, color || 'emerald', precio || 75]
+      [nombre, emoji || null, dia, hora_inicio, hora_fin, color || 'emerald', precio || 75]
     );
 
     res.status(201).json({
