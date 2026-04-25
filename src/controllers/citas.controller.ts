@@ -1,12 +1,8 @@
 import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
+import { registrarAudit } from '../db/audit';
 
-// ================================================
-// GET /api/citas
-// Trae todas las citas con datos del paciente,
-// profesional y area
-// ================================================
 export async function getCitas(
   req: RequestConUsuario,
   res: Response
@@ -14,7 +10,6 @@ export async function getCitas(
   try {
     const { fecha, profesional_id, estado } = req.query;
 
-    // Construir la consulta dinamicamente segun los filtros
     let query = `
       SELECT
         a.id,
@@ -29,6 +24,7 @@ export async function getCitas(
         a.estado_pago,
         a.fecha_pago,
         a.asistio,
+        a.created_by,
         p.id         as patient_id,
         p.nombre     as paciente_nombre,
         p.carnet     as paciente_carnet,
@@ -50,28 +46,24 @@ export async function getCitas(
     const params: any[] = [];
     let paramCount = 1;
 
-    // Filtro por fecha
     if (fecha) {
       query += ` AND a.fecha = $${paramCount}`;
       params.push(fecha);
       paramCount++;
     }
 
-    // Filtro por profesional
     if (profesional_id) {
       query += ` AND a.professional_id = $${paramCount}`;
       params.push(profesional_id);
       paramCount++;
     }
 
-    // Filtro por estado
     if (estado) {
       query += ` AND a.estado = $${paramCount}`;
       params.push(estado);
       paramCount++;
     }
 
-    // Si es profesional, solo ve sus propias citas
     if (req.usuario?.rol === 'profesional') {
       query += ` AND a.professional_id = $${paramCount}`;
       params.push(req.usuario.id);
@@ -87,17 +79,12 @@ export async function getCitas(
       citas: resultado.rows,
       total: resultado.rowCount,
     });
-
   } catch (error) {
     console.error('Error al obtener citas:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al obtener citas' });
   }
 }
 
-// ================================================
-// GET /api/citas/:id
-// Trae una cita especifica
-// ================================================
 export async function getCitaPorId(
   req: RequestConUsuario,
   res: Response
@@ -130,17 +117,12 @@ export async function getCitaPorId(
     }
 
     res.json({ ok: true, cita: resultado.rows[0] });
-
   } catch (error) {
     console.error('Error al obtener cita:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al obtener cita' });
   }
 }
 
-// ================================================
-// POST /api/citas
-// Crear nueva cita
-// ================================================
 export async function crearCita(
   req: RequestConUsuario,
   res: Response
@@ -164,7 +146,6 @@ export async function crearCita(
       estado_pago,
     } = req.body;
 
-    // Validaciones basicas
     if (!paciente_nombre || !professional_id || !area_id || !fecha || !hora) {
       res.status(400).json({
         ok: false,
@@ -173,7 +154,6 @@ export async function crearCita(
       return;
     }
 
-    // Verificar que no haya conflicto de horario
     const conflicto = await pool.query(
       `SELECT id FROM appointments
        WHERE professional_id = $1
@@ -191,7 +171,6 @@ export async function crearCita(
       return;
     }
 
-    // Buscar o crear el paciente
     let patient_id: number;
     const pacienteExistente = await pool.query(
       `SELECT id FROM patients WHERE telefono = $1`,
@@ -200,28 +179,25 @@ export async function crearCita(
 
     if (pacienteExistente.rows.length > 0) {
       patient_id = pacienteExistente.rows[0].id;
-      // Actualizar datos si cambiaron
       await pool.query(
-        `UPDATE patients SET nombre = $1, carnet = $2, edad = $3 WHERE id = $4`,
-        [paciente_nombre, paciente_carnet, paciente_edad, patient_id]
+        `UPDATE patients SET nombre = $1, carnet = $2, edad = $3, updated_by = $4 WHERE id = $5`,
+        [paciente_nombre, paciente_carnet, paciente_edad, req.usuario!.id, patient_id]
       );
     } else {
-      // Crear nuevo paciente
       const nuevoPaciente = await pool.query(
-        `INSERT INTO patients (nombre, carnet, telefono, edad)
-         VALUES ($1, $2, $3, $4) RETURNING id`,
-        [paciente_nombre, paciente_carnet, paciente_telefono, paciente_edad]
+        `INSERT INTO patients (nombre, carnet, telefono, edad, created_by)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [paciente_nombre, paciente_carnet, paciente_telefono, paciente_edad, req.usuario!.id]
       );
       patient_id = nuevoPaciente.rows[0].id;
     }
 
-    // Crear la cita
     const nuevaCita = await pool.query(
       `INSERT INTO appointments
         (patient_id, professional_id, area_id, fecha, hora, modalidad,
          sesion, estado, servicio_nombre, monto, metodo_pago, estado_pago,
-         fecha_pago)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         fecha_pago, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING id`,
       [
         patient_id,
@@ -237,25 +213,34 @@ export async function crearCita(
         metodo_pago     || null,
         estado_pago     || null,
         estado === 'confirmada' ? new Date().toISOString().split('T')[0] : null,
+        req.usuario!.id,
       ]
     );
+
+    const nuevaId = nuevaCita.rows[0].id;
+
+    await registrarAudit({
+      tabla: 'appointments',
+      registro_id: nuevaId,
+      accion: 'crear',
+      datos_despues: { paciente_nombre, professional_id, area_id, fecha, hora, estado },
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
     res.status(201).json({
       ok: true,
       mensaje: 'Cita creada correctamente',
-      id: nuevaCita.rows[0].id,
+      id: nuevaId,
     });
-
   } catch (error) {
     console.error('Error al crear cita:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al crear cita' });
   }
 }
 
-// ================================================
-// PUT /api/citas/:id
-// Actualizar cita (estado, asistencia, datos)
-// ================================================
 export async function actualizarCita(
   req: RequestConUsuario,
   res: Response
@@ -271,10 +256,12 @@ export async function actualizarCita(
          asistio     = COALESCE($2, asistio),
          monto       = COALESCE($3, monto),
          metodo_pago = COALESCE($4, metodo_pago),
-         estado_pago = COALESCE($5, estado_pago)
-       WHERE id = $6
+         estado_pago = COALESCE($5, estado_pago),
+         updated_at  = NOW(),
+         updated_by  = $6
+       WHERE id = $7
        RETURNING id`,
-      [estado, asistio, monto, metodo_pago, estado_pago, id]
+      [estado, asistio, monto, metodo_pago, estado_pago, req.usuario!.id, id]
     );
 
     if (resultado.rows.length === 0) {
@@ -282,18 +269,24 @@ export async function actualizarCita(
       return;
     }
 
-    res.json({ ok: true, mensaje: 'Cita actualizada correctamente' });
+    await registrarAudit({
+      tabla: 'appointments',
+      registro_id: parseInt(id as string),
+      accion: 'editar',
+      datos_despues: req.body,
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
+    res.json({ ok: true, mensaje: 'Cita actualizada correctamente' });
   } catch (error) {
     console.error('Error al actualizar cita:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al actualizar cita' });
   }
 }
 
-// ================================================
-// DELETE /api/citas/:id
-// Eliminar cita
-// ================================================
 export async function eliminarCita(
   req: RequestConUsuario,
   res: Response
@@ -311,8 +304,17 @@ export async function eliminarCita(
       return;
     }
 
-    res.json({ ok: true, mensaje: 'Cita eliminada correctamente' });
+    await registrarAudit({
+      tabla: 'appointments',
+      registro_id: parseInt(id as string),
+      accion: 'eliminar',
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
+    res.json({ ok: true, mensaje: 'Cita eliminada correctamente' });
   } catch (error) {
     console.error('Error al eliminar cita:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al eliminar cita' });

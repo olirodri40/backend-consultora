@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
+import { registrarAudit } from '../db/audit';
 
 export async function getPacientes(
   req: RequestConUsuario,
@@ -109,19 +110,32 @@ export async function actualizarPaciente(
 
     const resultado = await pool.query(
       `UPDATE patients SET
-        nombre   = COALESCE($1, nombre),
-        carnet   = COALESCE($2, carnet),
-        telefono = COALESCE($3, telefono),
-        edad     = COALESCE($4, edad)
-       WHERE id = $5
+        nombre     = COALESCE($1, nombre),
+        carnet     = COALESCE($2, carnet),
+        telefono   = COALESCE($3, telefono),
+        edad       = COALESCE($4, edad),
+        updated_at = NOW(),
+        updated_by = $5
+       WHERE id = $6
        RETURNING id`,
-      [nombre, carnet, telefono, edad, id]
+      [nombre, carnet, telefono, edad, req.usuario!.id, id]
     );
 
     if (resultado.rows.length === 0) {
       res.status(404).json({ ok: false, mensaje: 'Paciente no encontrado' });
       return;
     }
+
+    await registrarAudit({
+      tabla: 'patients',
+      registro_id: parseInt(id as string),
+      accion: 'editar',
+      datos_despues: req.body,
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
     res.json({ ok: true, mensaje: 'Paciente actualizado correctamente' });
   } catch (error) {
@@ -146,6 +160,16 @@ export async function eliminarPaciente(
       res.status(404).json({ ok: false, mensaje: 'Paciente no encontrado' });
       return;
     }
+
+    await registrarAudit({
+      tabla: 'patients',
+      registro_id: parseInt(id as string),
+      accion: 'eliminar',
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
     res.json({ ok: true, mensaje: 'Paciente eliminado correctamente' });
   } catch (error) {

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
+import { registrarAudit } from '../db/audit';
 
 export async function getUsuarios(
   req: RequestConUsuario,
@@ -10,30 +11,16 @@ export async function getUsuarios(
   try {
     const resultado = await pool.query(
       `SELECT
-        u.id,
-        u.nombre,
-        u.usuario,
-        u.email,
-        u.telefono,
-        u.especialidad,
-        u.tipo_horario,
-        u.fecha_nac,
-        u.sueldo,
-        u.contrato,
-        u.fecha_ingreso,
-        u.activo,
-        u.created_at,
-        r.id   as role_id,
-        r.nombre as rol,
-        a.id   as area_id,
-        a.nombre as area_nombre,
-        a.emoji  as area_emoji
+        u.id, u.nombre, u.usuario, u.email, u.telefono,
+        u.especialidad, u.tipo_horario, u.fecha_nac,
+        u.sueldo, u.contrato, u.fecha_ingreso, u.activo, u.created_at,
+        r.id as role_id, r.nombre as rol,
+        a.id as area_id, a.nombre as area_nombre, a.emoji as area_emoji
        FROM users u
        JOIN roles r ON u.role_id = r.id
        LEFT JOIN areas a ON u.area_id = a.id
        ORDER BY u.nombre`
     );
-
     res.json({ ok: true, usuarios: resultado.rows });
   } catch (error) {
     console.error('Error al obtener usuarios:', error);
@@ -47,7 +34,6 @@ export async function getUsuarioPorId(
 ): Promise<void> {
   try {
     const { id } = req.params;
-
     const resultado = await pool.query(
       `SELECT
         u.id, u.nombre, u.usuario, u.email, u.telefono,
@@ -61,12 +47,10 @@ export async function getUsuarioPorId(
        WHERE u.id = $1`,
       [id]
     );
-
     if (resultado.rows.length === 0) {
       res.status(404).json({ ok: false, mensaje: 'Usuario no encontrado' });
       return;
     }
-
     res.json({ ok: true, usuario: resultado.rows[0] });
   } catch (error) {
     console.error('Error al obtener usuario:', error);
@@ -97,12 +81,8 @@ export async function crearUsuario(
       'SELECT id FROM users WHERE usuario = $1',
       [usuario.toLowerCase()]
     );
-
     if (duplicado.rows.length > 0) {
-      res.status(409).json({
-        ok: false,
-        mensaje: `El usuario "${usuario}" ya existe`
-      });
+      res.status(409).json({ ok: false, mensaje: `El usuario "${usuario}" ya existe` });
       return;
     }
 
@@ -111,30 +91,42 @@ export async function crearUsuario(
     const resultado = await pool.query(
       `INSERT INTO users
         (nombre, usuario, password, email, telefono, role_id, area_id,
-         especialidad, tipo_horario, fecha_nac, sueldo, contrato, fecha_ingreso)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         especialidad, tipo_horario, fecha_nac, sueldo, contrato, fecha_ingreso,
+         created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING id`,
       [
         nombre, usuario.toLowerCase(), hash, email || null,
         telefono || null, role_id, area_id || null,
         especialidad || null, tipo_horario || 'diario',
         fecha_nac || null, sueldo || null,
-        contrato || 'indefinido', fecha_ingreso || null
+        contrato || 'indefinido', fecha_ingreso || null,
+        req.usuario!.id
       ]
     );
+
+    const nuevoId = resultado.rows[0].id;
+
+    // Registrar en auditoria
+    await registrarAudit({
+      tabla: 'users',
+      registro_id: nuevoId,
+      accion: 'crear',
+      datos_despues: { nombre, usuario, role_id, area_id },
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
     res.status(201).json({
       ok: true,
       mensaje: 'Usuario creado correctamente',
-      id: resultado.rows[0].id
+      id: nuevoId
     });
   } catch (error: any) {
     console.error('Error al crear usuario:', error);
-    res.status(500).json({ 
-      ok: false, 
-      mensaje: 'Error al crear usuario',
-      detalle: error.message 
-    });
+    res.status(500).json({ ok: false, mensaje: 'Error al crear usuario', detalle: error.message });
   }
 }
 
@@ -157,26 +149,28 @@ export async function actualizarUsuario(
 
     const resultado = await pool.query(
       `UPDATE users SET
-        nombre       = COALESCE($1, nombre),
-        email        = COALESCE($2, email),
-        telefono     = COALESCE($3, telefono),
-        role_id      = COALESCE($4, role_id),
-        area_id      = COALESCE($5, area_id),
-        especialidad = COALESCE($6, especialidad),
-        tipo_horario = COALESCE($7, tipo_horario),
-        fecha_nac    = COALESCE($8, fecha_nac),
-        sueldo       = COALESCE($9, sueldo),
-        contrato     = COALESCE($10, contrato),
-        fecha_ingreso= COALESCE($11, fecha_ingreso),
-        activo       = COALESCE($12, activo),
-        password     = COALESCE($13, password)
-       WHERE id = $14
+        nombre        = COALESCE($1, nombre),
+        email         = COALESCE($2, email),
+        telefono      = COALESCE($3, telefono),
+        role_id       = COALESCE($4, role_id),
+        area_id       = COALESCE($5, area_id),
+        especialidad  = COALESCE($6, especialidad),
+        tipo_horario  = COALESCE($7, tipo_horario),
+        fecha_nac     = COALESCE($8, fecha_nac),
+        sueldo        = COALESCE($9, sueldo),
+        contrato      = COALESCE($10, contrato),
+        fecha_ingreso = COALESCE($11, fecha_ingreso),
+        activo        = COALESCE($12, activo),
+        password      = COALESCE($13, password),
+        updated_at    = NOW(),
+        updated_by    = $14
+       WHERE id = $15
        RETURNING id`,
       [
         nombre, email, telefono, role_id, area_id,
         especialidad, tipo_horario, fecha_nac,
         sueldo, contrato, fecha_ingreso, activo,
-        passwordHash, id
+        passwordHash, req.usuario!.id, id
       ]
     );
 
@@ -184,6 +178,18 @@ export async function actualizarUsuario(
       res.status(404).json({ ok: false, mensaje: 'Usuario no encontrado' });
       return;
     }
+
+    // Registrar en auditoria
+    await registrarAudit({
+      tabla: 'users',
+      registro_id: parseInt(id as string),
+      accion: 'editar',
+      datos_despues: req.body,
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
     res.json({ ok: true, mensaje: 'Usuario actualizado correctamente' });
   } catch (error) {
@@ -199,11 +205,8 @@ export async function eliminarUsuario(
   try {
     const { id } = req.params;
 
-   if (parseInt(id as string) === req.usuario?.id)  {
-      res.status(400).json({
-        ok: false,
-        mensaje: 'No puedes eliminar tu propio usuario'
-      });
+    if (parseInt(id as string) === req.usuario?.id) {
+      res.status(400).json({ ok: false, mensaje: 'No puedes eliminar tu propio usuario' });
       return;
     }
 
@@ -216,6 +219,17 @@ export async function eliminarUsuario(
       res.status(404).json({ ok: false, mensaje: 'Usuario no encontrado' });
       return;
     }
+
+    // Registrar en auditoria
+    await registrarAudit({
+      tabla: 'users',
+      registro_id: parseInt(id as string),
+      accion: 'eliminar',
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
 
     res.json({ ok: true, mensaje: 'Usuario eliminado correctamente' });
   } catch (error) {
@@ -230,7 +244,6 @@ export async function getHorariosUsuario(
 ): Promise<void> {
   try {
     const { id } = req.params;
-
     const resultado = await pool.query(
       `SELECT id, dia, hora_inicio::text, hora_fin::text
        FROM availability
@@ -247,7 +260,6 @@ export async function getHorariosUsuario(
          END`,
       [id]
     );
-
     res.json({ ok: true, horarios: resultado.rows });
   } catch (error) {
     console.error('Error al obtener horarios:', error);
@@ -278,9 +290,63 @@ export async function guardarHorariosUsuario(
       );
     }
 
+    await registrarAudit({
+      tabla: 'availability',
+      registro_id: parseInt(id as string),
+      accion: 'editar',
+      datos_despues: { horarios },
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
+
     res.json({ ok: true, mensaje: 'Horarios guardados correctamente' });
   } catch (error) {
     console.error('Error al guardar horarios:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al guardar horarios' });
+  }
+}
+
+export async function getAuditLog(
+  req: RequestConUsuario,
+  res: Response
+): Promise<void> {
+  try {
+    const { tabla, user_id, limite } = req.query;
+
+    let query = `
+      SELECT
+        a.id, a.tabla, a.registro_id, a.accion,
+        a.datos_antes, a.datos_despues,
+        a.user_nombre, a.user_rol, a.ip, a.created_at,
+        u.nombre as usuario_nombre
+       FROM audit_log a
+       LEFT JOIN users u ON a.user_id = u.id
+       WHERE 1=1
+    `;
+
+    const params: any[] = [];
+    let count = 1;
+
+    if (tabla) {
+      query += ` AND a.tabla = $${count}`;
+      params.push(tabla);
+      count++;
+    }
+    if (user_id) {
+      query += ` AND a.user_id = $${count}`;
+      params.push(user_id);
+      count++;
+    }
+
+    query += ` ORDER BY a.created_at DESC LIMIT $${count}`;
+    params.push(parseInt(limite as string) || 100);
+
+    const resultado = await pool.query(query, params);
+    res.json({ ok: true, logs: resultado.rows });
+  } catch (error) {
+    console.error('Error al obtener audit log:', error);
+    res.status(500).json({ ok: false, mensaje: 'Error al obtener log' });
   }
 }
