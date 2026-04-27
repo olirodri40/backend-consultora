@@ -22,28 +22,41 @@ export async function getParticipantes(
   res: Response
 ): Promise<void> {
   try {
-    const resultado = await pool.query(
-      `SELECT
-        p.id,
-        p.nombre,
-        p.carnet,
-        p.telefono,
-        p.fecha_nac,
-        p.activo,
-        c.id           as ciclo_id,
-        c.numero_ciclo,
-        c.fecha_inicio,
-        c.monto,
-        c.metodo_pago,
-        c.estado       as ciclo_estado,
-        ARRAY_AGG(ca.activity_id) FILTER (WHERE ca.activity_id IS NOT NULL) as actividades_ids
-       FROM geronto_participants p
-       LEFT JOIN geronto_cycles c ON c.participant_id = p.id AND c.estado = 'activo'
-       LEFT JOIN geronto_cycle_activities ca ON ca.cycle_id = c.id
-       WHERE p.activo = true
-       GROUP BY p.id, c.id
-       ORDER BY p.nombre`
-    );
+ const resultado = await pool.query(
+  `SELECT
+    p.id,
+    p.nombre,
+    p.carnet,
+    p.telefono,
+    p.fecha_nac,
+    p.activo,
+    c.id           as ciclo_id,
+    c.numero_ciclo,
+    c.fecha_inicio,
+    c.monto,
+    c.metodo_pago,
+    c.estado       as ciclo_estado,
+    ARRAY_AGG(DISTINCT ca.activity_id) FILTER (WHERE ca.activity_id IS NOT NULL) as actividades_ids,
+    COUNT(DISTINCT ca.activity_id) FILTER (WHERE ca.activity_id IS NOT NULL) as total_actividades,
+    (SELECT COUNT(*) FROM geronto_attendance ga WHERE ga.participant_id = p.id AND ga.cycle_id = c.id AND ga.estado = 'asistio')    as clases_asistidas,
+    (SELECT COUNT(*) FROM geronto_attendance ga WHERE ga.participant_id = p.id AND ga.cycle_id = c.id AND ga.estado = 'falta')      as clases_falta,
+    (SELECT COUNT(*) FROM geronto_attendance ga WHERE ga.participant_id = p.id AND ga.cycle_id = c.id AND ga.estado = 'permiso')    as clases_permiso,
+    (SELECT COUNT(*) FROM geronto_attendance ga WHERE ga.participant_id = p.id AND ga.cycle_id = c.id AND ga.estado = 'suspendida') as clases_suspendida,
+    JSON_OBJECT_AGG(
+      DISTINCT ca.activity_id,
+      (SELECT COUNT(*) FROM geronto_attendance ga
+       WHERE ga.participant_id = p.id
+       AND ga.cycle_id = c.id
+       AND ga.activity_id = ca.activity_id
+       AND ga.estado = 'asistio')
+    ) FILTER (WHERE ca.activity_id IS NOT NULL) as asistencia_por_actividad
+   FROM geronto_participants p
+   LEFT JOIN geronto_cycles c ON c.participant_id = p.id AND c.estado = 'activo'
+   LEFT JOIN geronto_cycle_activities ca ON ca.cycle_id = c.id
+   WHERE p.activo = true
+   GROUP BY p.id, c.id
+   ORDER BY p.nombre`
+);
     res.json({ ok: true, participantes: resultado.rows });
   } catch (error) {
     console.error('Error al obtener participantes geronto:', error);
@@ -252,5 +265,62 @@ export async function eliminarParticipante(
   } catch (error) {
     console.error('Error al eliminar participante geronto:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al eliminar participante' });
+  }
+}
+export async function editarParticipante(
+  req: RequestConUsuario,
+  res: Response
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { nombre, carnet, telefono, fecha_nac, actividades_ids, fecha_inicio, monto, metodo_pago } = req.body;
+
+    await pool.query(
+      `UPDATE geronto_participants SET
+        nombre    = COALESCE($1, nombre),
+        carnet    = COALESCE($2, carnet),
+        telefono  = COALESCE($3, telefono),
+        fecha_nac = COALESCE($4, fecha_nac)
+       WHERE id = $5`,
+      [nombre, carnet || null, telefono || null, fecha_nac || null, id]
+    );
+
+    const cicloActivo = await pool.query(
+      `SELECT id FROM geronto_cycles WHERE participant_id = $1 AND estado = 'activo'`,
+      [id]
+    );
+
+    if (cicloActivo.rows.length > 0) {
+      const cid = cicloActivo.rows[0].id;
+
+      if (fecha_inicio || monto || metodo_pago) {
+        await pool.query(
+          `UPDATE geronto_cycles SET
+            fecha_inicio = COALESCE($1, fecha_inicio),
+            monto        = COALESCE($2, monto),
+            metodo_pago  = COALESCE($3, metodo_pago)
+           WHERE id = $4`,
+          [fecha_inicio || null, monto || null, metodo_pago || null, cid]
+        );
+      }
+
+      if (actividades_ids?.length) {
+        await pool.query(
+          `DELETE FROM geronto_cycle_activities WHERE cycle_id = $1`,
+          [cid]
+        );
+        for (const actId of actividades_ids) {
+          await pool.query(
+            `INSERT INTO geronto_cycle_activities (cycle_id, activity_id) VALUES ($1, $2)`,
+            [cid, actId]
+          );
+        }
+      }
+    }
+
+    res.json({ ok: true, mensaje: 'Participante actualizado correctamente' });
+  } catch (error) {
+    console.error('Error al editar participante geronto:', error);
+    res.status(500).json({ ok: false, mensaje: 'Error al editar participante' });
   }
 }

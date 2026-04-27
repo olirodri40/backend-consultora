@@ -177,3 +177,40 @@ export async function eliminarPaciente(
     res.status(500).json({ ok: false, mensaje: 'Error al eliminar paciente' });
   }
 }
+export async function crearPaciente(
+  req: RequestConUsuario,
+  res: Response
+): Promise<void> {
+  try {
+    const { nombre, carnet, telefono, edad } = req.body;
+
+    if (!nombre) {
+      res.status(400).json({ ok: false, mensaje: 'El nombre es obligatorio' });
+      return;
+    }
+
+    const resultado = await pool.query(
+      `INSERT INTO patients (nombre, carnet, telefono, edad, created_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [nombre, carnet || null, telefono || null, edad || null, req.usuario!.id]
+    );
+
+    const nuevoId = resultado.rows[0].id;
+
+    await registrarAudit({
+      tabla: 'patients',
+      registro_id: nuevoId,
+      accion: 'crear',
+      datos_despues: { nombre, carnet, telefono, edad },
+      user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol,
+      user_rol: req.usuario!.rol,
+      ip: req.ip,
+    });
+
+    res.status(201).json({ ok: true, mensaje: 'Paciente creado correctamente', id: nuevoId });
+  } catch (error) {
+    console.error('Error al crear paciente:', error);
+    res.status(500).json({ ok: false, mensaje: 'Error al crear paciente' });
+  }
+}

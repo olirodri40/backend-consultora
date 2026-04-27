@@ -358,6 +358,7 @@ export async function getProfesionales(
     const resultado = await pool.query(
       `SELECT
         u.id,
+        u.area_id,
         u.nombre,
         u.email,
         u.telefono,
@@ -387,5 +388,27 @@ export async function getProfesionales(
   } catch (error) {
     console.error('Error al obtener profesionales:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al obtener profesionales' });
+  }
+}
+export async function getTodosHorarios(
+  req: RequestConUsuario,
+  res: Response
+): Promise<void> {
+  try {
+    const resultado = await pool.query(
+      `SELECT
+        av.id, av.dia, av.hora_inicio::text, av.hora_fin::text,
+        u.id as user_id, u.nombre as profesional_nombre,
+        a.nombre as area_nombre, a.emoji as area_emoji, a.color as area_color
+       FROM availability av
+       JOIN users u ON av.user_id = u.id
+       LEFT JOIN areas a ON u.area_id = a.id
+       WHERE u.activo = true
+       ORDER BY u.nombre, av.dia, av.hora_inicio`
+    );
+    res.json({ ok: true, horarios: resultado.rows });
+  } catch (error) {
+    console.error('Error al obtener todos los horarios:', error);
+    res.status(500).json({ ok: false, mensaje: 'Error al obtener horarios' });
   }
 }

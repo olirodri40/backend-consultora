@@ -216,3 +216,45 @@ export async function eliminarParticipante(
     res.status(500).json({ ok: false, mensaje: 'Error al eliminar participante' });
   }
 }
+export async function editarParticipante(
+  req: RequestConUsuario,
+  res: Response
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { nombre, carnet, telefono, fecha_nac, fecha_inicio, clases_pagadas, monto, metodo_pago } = req.body;
+
+    await pool.query(
+      `UPDATE zumba_participants SET
+        nombre    = COALESCE($1, nombre),
+        carnet    = COALESCE($2, carnet),
+        telefono  = COALESCE($3, telefono),
+        fecha_nac = COALESCE($4, fecha_nac)
+       WHERE id = $5`,
+      [nombre, carnet || null, telefono || null, fecha_nac || null, id]
+    );
+
+    const cicloActivo = await pool.query(
+      `SELECT id FROM zumba_cycles WHERE participant_id = $1 AND estado = 'activo'`,
+      [id]
+    );
+
+    if (cicloActivo.rows.length > 0) {
+      const cid = cicloActivo.rows[0].id;
+      await pool.query(
+        `UPDATE zumba_cycles SET
+          fecha_inicio   = COALESCE($1, fecha_inicio),
+          clases_pagadas = COALESCE($2, clases_pagadas),
+          monto          = COALESCE($3, monto),
+          metodo_pago    = COALESCE($4, metodo_pago)
+         WHERE id = $5`,
+        [fecha_inicio || null, clases_pagadas || null, monto || null, metodo_pago || null, cid]
+      );
+    }
+
+    res.json({ ok: true, mensaje: 'Participante actualizado correctamente' });
+  } catch (error) {
+    console.error('Error al editar participante zumba:', error);
+    res.status(500).json({ ok: false, mensaje: 'Error al editar participante' });
+  }
+}
