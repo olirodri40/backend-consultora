@@ -19,9 +19,10 @@ export async function getPacientes(
         p.edad,
         p.created_at,
         COUNT(a.id) as total_citas,
-        SUM(CASE WHEN a.estado = 'confirmada' THEN 1 ELSE 0 END) as citas_confirmadas,
-        SUM(CASE WHEN a.estado = 'pendiente'  THEN 1 ELSE 0 END) as citas_pendientes,
-        COALESCE(SUM(a.monto), 0) as total_pagado
+SUM(CASE WHEN a.estado = 'confirmada' THEN 1 ELSE 0 END) as citas_confirmadas,
+SUM(CASE WHEN a.estado = 'pendiente'  THEN 1 ELSE 0 END) as citas_pendientes,
+COALESCE(MAX(a.total_sesiones), 0) as total_sesiones_pagadas,
+        COALESCE(SUM(CASE WHEN a.sesion::text = '1' THEN a.monto_pagado ELSE 0 END), 0) as total_pagado
       FROM patients p
       LEFT JOIN appointments a ON p.id = a.patient_id
       WHERE 1=1
@@ -73,21 +74,21 @@ export async function getPacientePorId(
     }
 
     const citas = await pool.query(
-      `SELECT
-        a.id, a.fecha, a.hora::text, a.sesion,
-        a.estado, a.modalidad, a.monto,
-        a.metodo_pago, a.estado_pago, a.asistio,
-        a.servicio_nombre,
-        u.nombre  as profesional_nombre,
-        ar.nombre as area_nombre,
-        ar.emoji  as area_emoji
-       FROM appointments a
-       JOIN users u  ON a.professional_id = u.id
-       JOIN areas ar ON a.area_id         = ar.id
-       WHERE a.patient_id = $1
-       ORDER BY a.fecha DESC, a.hora DESC`,
-      [id]
-    );
+  `SELECT
+    a.id, a.fecha, a.hora::text, a.sesion, a.total_sesiones,
+    a.estado, a.modalidad, a.monto, a.monto_total, a.monto_pagado,
+    a.metodo_pago, a.estado_pago, a.asistio,
+    a.servicio_nombre,
+    u.nombre  as profesional_nombre,
+    ar.nombre as area_nombre,
+    ar.emoji  as area_emoji
+   FROM appointments a
+   JOIN users u  ON a.professional_id = u.id
+   JOIN areas ar ON a.area_id         = ar.id
+   WHERE a.patient_id = $1
+   ORDER BY a.fecha ASC, a.hora ASC`,
+  [id]
+);
 
     res.json({
       ok: true,
