@@ -15,10 +15,23 @@ export async function getUsuarios(
         u.especialidad, u.tipo_horario, u.fecha_nac,
         u.sueldo, u.contrato, u.fecha_ingreso, u.activo, u.created_at,
         r.id as role_id, r.nombre as rol,
-        a.id as area_id, a.nombre as area_nombre, a.emoji as area_emoji
+        a.id as area_id, a.nombre as area_nombre, a.emoji as area_emoji,
+        COALESCE(
+          JSON_AGG(DISTINCT jsonb_build_object('id', ua.area_id, 'nombre', ua2.nombre, 'emoji', ua2.emoji))
+          FILTER (WHERE ua.area_id IS NOT NULL), '[]'
+        ) as areas,
+        COALESCE(
+          JSON_AGG(DISTINCT jsonb_build_object('id', uga.activity_id, 'nombre', ga.nombre, 'emoji', ga.emoji, 'dia', ga.dia))
+          FILTER (WHERE uga.activity_id IS NOT NULL), '[]'
+        ) as actividades_geronto
        FROM users u
        JOIN roles r ON u.role_id = r.id
        LEFT JOIN areas a ON u.area_id = a.id
+       LEFT JOIN user_areas ua ON ua.user_id = u.id
+       LEFT JOIN areas ua2 ON ua2.id = ua.area_id
+       LEFT JOIN user_geronto_activities uga ON uga.user_id = u.id
+       LEFT JOIN geronto_activities ga ON ga.id = uga.activity_id
+       GROUP BY u.id, r.id, a.id
        ORDER BY u.nombre`
     );
     res.json({ ok: true, usuarios: resultado.rows });
@@ -40,11 +53,24 @@ export async function getUsuarioPorId(
         u.especialidad, u.tipo_horario, u.fecha_nac,
         u.sueldo, u.contrato, u.fecha_ingreso, u.activo,
         r.id as role_id, r.nombre as rol,
-        a.id as area_id, a.nombre as area_nombre
+        a.id as area_id, a.nombre as area_nombre,
+        COALESCE(
+          JSON_AGG(DISTINCT jsonb_build_object('id', ua.area_id, 'nombre', ua2.nombre, 'emoji', ua2.emoji))
+          FILTER (WHERE ua.area_id IS NOT NULL), '[]'
+        ) as areas,
+        COALESCE(
+          JSON_AGG(DISTINCT jsonb_build_object('id', uga.activity_id, 'nombre', ga.nombre, 'emoji', ga.emoji, 'dia', ga.dia))
+          FILTER (WHERE uga.activity_id IS NOT NULL), '[]'
+        ) as actividades_geronto
        FROM users u
        JOIN roles r ON u.role_id = r.id
        LEFT JOIN areas a ON u.area_id = a.id
-       WHERE u.id = $1`,
+       LEFT JOIN user_areas ua ON ua.user_id = u.id
+       LEFT JOIN areas ua2 ON ua2.id = ua.area_id
+       LEFT JOIN user_geronto_activities uga ON uga.user_id = u.id
+       LEFT JOIN geronto_activities ga ON ga.id = uga.activity_id
+       WHERE u.id = $1
+       GROUP BY u.id, r.id, a.id`,
       [id]
     );
     if (resultado.rows.length === 0) {
@@ -65,8 +91,9 @@ export async function crearUsuario(
   try {
     const {
       nombre, usuario, password, email, telefono,
-      role_id, area_id, especialidad, tipo_horario,
-      fecha_nac, sueldo, contrato, fecha_ingreso
+      role_id, area_id, areas_ids, especialidad, tipo_horario,
+      fecha_nac, sueldo, contrato, fecha_ingreso,
+      actividades_geronto_ids,
     } = req.body;
 
     if (!nombre || !usuario || !password || !role_id) {
@@ -88,6 +115,9 @@ export async function crearUsuario(
 
     const hash = await bcrypt.hash(password, 10);
 
+    // area_id principal = primera área seleccionada
+    const areaIdPrincipal = area_id || (areas_ids && areas_ids.length > 0 ? areas_ids[0] : null);
+
     const resultado = await pool.query(
       `INSERT INTO users
         (nombre, usuario, password, email, telefono, role_id, area_id,
@@ -97,7 +127,7 @@ export async function crearUsuario(
        RETURNING id`,
       [
         nombre, usuario.toLowerCase(), hash, email || null,
-        telefono || null, role_id, area_id || null,
+        telefono || null, role_id, areaIdPrincipal || null,
         especialidad || null, tipo_horario || 'diario',
         fecha_nac || null, sueldo || null,
         contrato || 'indefinido', fecha_ingreso || null,
@@ -107,12 +137,36 @@ export async function crearUsuario(
 
     const nuevoId = resultado.rows[0].id;
 
-    // Registrar en auditoria
+    // Guardar múltiples áreas
+    if (areas_ids && areas_ids.length > 0) {
+      for (const aId of areas_ids) {
+        await pool.query(
+          `INSERT INTO user_areas (user_id, area_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [nuevoId, aId]
+        );
+      }
+    } else if (areaIdPrincipal) {
+      await pool.query(
+        `INSERT INTO user_areas (user_id, area_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [nuevoId, areaIdPrincipal]
+      );
+    }
+
+    // Guardar actividades geronto
+    if (actividades_geronto_ids && actividades_geronto_ids.length > 0) {
+      for (const actId of actividades_geronto_ids) {
+        await pool.query(
+          `INSERT INTO user_geronto_activities (user_id, activity_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [nuevoId, actId]
+        );
+      }
+    }
+
     await registrarAudit({
       tabla: 'users',
       registro_id: nuevoId,
       accion: 'crear',
-      datos_despues: { nombre, usuario, role_id, area_id },
+      datos_despues: { nombre, usuario, role_id, area_id: areaIdPrincipal, areas_ids },
       user_id: req.usuario!.id,
       user_nombre: req.usuario!.rol,
       user_rol: req.usuario!.rol,
@@ -137,15 +191,19 @@ export async function actualizarUsuario(
   try {
     const { id } = req.params;
     const {
-      nombre, email, telefono, role_id, area_id,
+      nombre, email, telefono, role_id, area_id, areas_ids,
       especialidad, tipo_horario, fecha_nac,
-      sueldo, contrato, fecha_ingreso, activo, password
+      sueldo, contrato, fecha_ingreso, activo, password,
+      actividades_geronto_ids,
     } = req.body;
 
     let passwordHash = null;
     if (password) {
       passwordHash = await bcrypt.hash(password, 10);
     }
+
+    // area_id principal
+    const areaIdPrincipal = area_id || (areas_ids && areas_ids.length > 0 ? areas_ids[0] : null);
 
     const resultado = await pool.query(
       `UPDATE users SET
@@ -167,7 +225,7 @@ export async function actualizarUsuario(
        WHERE id = $15
        RETURNING id`,
       [
-        nombre, email, telefono, role_id, area_id,
+        nombre, email, telefono, role_id, areaIdPrincipal,
         especialidad, tipo_horario, fecha_nac,
         sueldo, contrato, fecha_ingreso, activo,
         passwordHash, req.usuario!.id, id
@@ -179,7 +237,28 @@ export async function actualizarUsuario(
       return;
     }
 
-    // Registrar en auditoria
+    // Actualizar áreas
+    if (areas_ids !== undefined) {
+      await pool.query('DELETE FROM user_areas WHERE user_id = $1', [id]);
+      for (const aId of areas_ids) {
+        await pool.query(
+          `INSERT INTO user_areas (user_id, area_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [id, aId]
+        );
+      }
+    }
+
+    // Actualizar actividades geronto
+    if (actividades_geronto_ids !== undefined) {
+      await pool.query('DELETE FROM user_geronto_activities WHERE user_id = $1', [id]);
+      for (const actId of actividades_geronto_ids) {
+        await pool.query(
+          `INSERT INTO user_geronto_activities (user_id, activity_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [id, actId]
+        );
+      }
+    }
+
     await registrarAudit({
       tabla: 'users',
       registro_id: parseInt(id as string),
@@ -220,7 +299,6 @@ export async function eliminarUsuario(
       return;
     }
 
-    // Registrar en auditoria
     await registrarAudit({
       tabla: 'users',
       registro_id: parseInt(id as string),
@@ -245,7 +323,8 @@ export async function getHorariosUsuario(
   try {
     const { id } = req.params;
     const resultado = await pool.query(
-      `SELECT id, dia, hora_inicio::text, hora_fin::text
+      `SELECT id, dia, hora_inicio::text, hora_fin::text, 
+              COALESCE(slot_minutos, 60) as slot_minutos  -- ✅ NUEVO
        FROM availability
        WHERE user_id = $1
        ORDER BY
@@ -284,9 +363,9 @@ export async function guardarHorariosUsuario(
 
     for (const h of horarios) {
       await pool.query(
-        `INSERT INTO availability (user_id, dia, hora_inicio, hora_fin)
-         VALUES ($1, $2, $3, $4)`,
-        [id, h.dia, h.hora_inicio, h.hora_fin]
+        `INSERT INTO availability (user_id, dia, hora_inicio, hora_fin, slot_minutos)
+         VALUES ($1, $2, $3, $4, $5)`,  // ✅ NUEVO: slot_minutos
+        [id, h.dia, h.hora_inicio, h.hora_fin, h.slot_minutos || 60]  // ✅ NUEVO
       );
     }
 
@@ -307,7 +386,6 @@ export async function guardarHorariosUsuario(
     res.status(500).json({ ok: false, mensaje: 'Error al guardar horarios' });
   }
 }
-
 export async function getAuditLog(
   req: RequestConUsuario,
   res: Response
@@ -350,6 +428,7 @@ export async function getAuditLog(
     res.status(500).json({ ok: false, mensaje: 'Error al obtener log' });
   }
 }
+
 export async function getProfesionales(
   req: RequestConUsuario,
   res: Response
@@ -375,12 +454,36 @@ export async function getProfesionales(
         a.emoji  as area_emoji,
         a.color  as area_color,
         EXTRACT(YEAR FROM AGE(u.fecha_nac)) as edad,
-        TO_CHAR(u.fecha_nac, 'DD/MM') as cumple_dia_mes
+        TO_CHAR(u.fecha_nac, 'DD/MM') as cumple_dia_mes,
+        COALESCE(
+          JSON_AGG(DISTINCT jsonb_build_object('id', ua.area_id, 'nombre', ua2.nombre, 'emoji', ua2.emoji))
+          FILTER (WHERE ua.area_id IS NOT NULL), '[]'
+        ) as areas,
+        -- ✅ NUEVO: Agregar actividades de gerontología
+        COALESCE(
+          JSON_AGG(DISTINCT jsonb_build_object(
+            'id', ga.id,
+            'nombre', ga.nombre,
+            'emoji', ga.emoji,
+            'dia', ga.dia,
+            'hora_inicio', ga.hora_inicio,
+            'hora_fin', ga.hora_fin,
+            'color', ga.color,
+            'precio', ga.precio
+          ))
+          FILTER (WHERE ga.id IS NOT NULL), '[]'
+        ) as actividades_geronto
        FROM users u
        JOIN roles r ON u.role_id = r.id
        LEFT JOIN areas a ON u.area_id = a.id
+       LEFT JOIN user_areas ua ON ua.user_id = u.id
+       LEFT JOIN areas ua2 ON ua2.id = ua.area_id
+       -- ✅ NUEVO: JOIN para actividades de gerontología
+       LEFT JOIN user_geronto_activities uga ON uga.user_id = u.id
+       LEFT JOIN geronto_activities ga ON ga.id = uga.activity_id AND ga.activo = true
        WHERE r.nombre IN ('profesional', 'supervisor')
        AND u.activo = true
+       GROUP BY u.id, r.id, a.id
        ORDER BY a.nombre, u.nombre`
     );
 
@@ -390,6 +493,7 @@ export async function getProfesionales(
     res.status(500).json({ ok: false, mensaje: 'Error al obtener profesionales' });
   }
 }
+
 export async function getTodosHorarios(
   req: RequestConUsuario,
   res: Response
@@ -398,6 +502,7 @@ export async function getTodosHorarios(
     const resultado = await pool.query(
       `SELECT
         av.id, av.dia, av.hora_inicio::text, av.hora_fin::text,
+        COALESCE(av.slot_minutos, 60) as slot_minutos,  -- ✅ NUEVO
         u.id as user_id, u.nombre as profesional_nombre,
         a.nombre as area_nombre, a.emoji as area_emoji, a.color as area_color
        FROM availability av

@@ -18,8 +18,10 @@ export async function getCitas(
         a.modalidad,
         a.sesion,
         a.total_sesiones,
+        a.ciclo,
         a.estado,
         a.servicio_nombre,
+        a.duracion_min,
         a.monto,
         a.monto_total,
         a.monto_pagado,
@@ -132,139 +134,213 @@ export async function crearCita(
   res: Response
 ): Promise<void> {
   try {
-    const {
-      paciente_nombre,
-      paciente_telefono,
-      paciente_carnet,
-      paciente_edad,
-      professional_id,
-      area_id,
-      fecha,
-      hora,
-      modalidad,
-      sesion,
-      total_sesiones,
-      estado,
-      servicio_nombre,
-      monto_total,
-      monto_pagado,
-      metodo_pago,
-      notas,
-    } = req.body;
+    // En crearCita, agrega duracion_min al destructuring:
+const {
+  paciente_nombre, paciente_telefono, paciente_carnet, paciente_edad,
+  professional_id, area_id, fecha, hora, modalidad, sesion, total_sesiones,
+  estado, servicio_nombre, monto_total, monto_pagado, metodo_pago, notas,
+  ciclo, patient_id: patient_id_externo,
+  duracion_min, // ✅ AGREGAR ESTO
+} = req.body;
 
     if (!paciente_nombre || !professional_id || !area_id || !fecha || !hora) {
-      res.status(400).json({
-        ok: false,
-        mensaje: 'Faltan datos obligatorios: nombre, profesional, area, fecha y hora',
-      });
+      res.status(400).json({ ok: false, mensaje: 'Faltan datos obligatorios' });
       return;
     }
 
     const conflicto = await pool.query(
-      `SELECT id FROM appointments
-       WHERE professional_id = $1
-       AND fecha = $2
-       AND hora = $3
-       AND estado != 'cancelada'`,
+      `SELECT id FROM appointments WHERE professional_id=$1 AND fecha=$2 AND hora=$3 AND estado!='cancelada'`,
       [professional_id, fecha, hora]
     );
-
     if (conflicto.rows.length > 0) {
-      res.status(409).json({
-        ok: false,
-        mensaje: `El profesional ya tiene una cita a las ${hora} ese dia`,
-      });
+      res.status(409).json({ ok: false, mensaje: `El profesional ya tiene una cita a las ${hora} ese dia` });
       return;
     }
 
-    // Buscar o crear paciente
     let patient_id: number;
-    if (paciente_telefono) {
-      const pacienteExistente = await pool.query(
-        `SELECT id FROM patients WHERE telefono = $1`,
-        [paciente_telefono]
+    if (patient_id_externo) {
+      patient_id = patient_id_externo;
+      await pool.query(
+        `UPDATE patients SET nombre=$1, carnet=$2, edad=$3, updated_by=$4 WHERE id=$5`,
+        [paciente_nombre, paciente_carnet || null, paciente_edad || null, req.usuario!.id, patient_id]
       );
-      if (pacienteExistente.rows.length > 0) {
-        patient_id = pacienteExistente.rows[0].id;
+    } else if (paciente_telefono) {
+      const existe = await pool.query(`SELECT id FROM patients WHERE telefono=$1`, [paciente_telefono]);
+      if (existe.rows.length > 0) {
+        patient_id = existe.rows[0].id;
         await pool.query(
-          `UPDATE patients SET nombre = $1, carnet = $2, edad = $3, updated_by = $4 WHERE id = $5`,
+          `UPDATE patients SET nombre=$1, carnet=$2, edad=$3, updated_by=$4 WHERE id=$5`,
           [paciente_nombre, paciente_carnet || null, paciente_edad || null, req.usuario!.id, patient_id]
         );
       } else {
-        const nuevoPaciente = await pool.query(
-          `INSERT INTO patients (nombre, carnet, telefono, edad, created_by)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        const nuevo = await pool.query(
+          `INSERT INTO patients (nombre, carnet, telefono, edad, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
           [paciente_nombre, paciente_carnet || null, paciente_telefono, paciente_edad || null, req.usuario!.id]
         );
-        patient_id = nuevoPaciente.rows[0].id;
+        patient_id = nuevo.rows[0].id;
       }
     } else {
-      const nuevoPaciente = await pool.query(
-        `INSERT INTO patients (nombre, carnet, telefono, edad, created_by)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      const nuevo = await pool.query(
+        `INSERT INTO patients (nombre, carnet, telefono, edad, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
         [paciente_nombre, paciente_carnet || null, null, paciente_edad || null, req.usuario!.id]
       );
-      patient_id = nuevoPaciente.rows[0].id;
+      patient_id = nuevo.rows[0].id;
     }
 
     const montoTotalNum = monto_total ? Number(monto_total) : 0;
     const montoPagadoNum = monto_pagado ? Number(monto_pagado) : 0;
-    const montoPendiente = montoTotalNum - montoPagadoNum;
-    const estadoPago = estado === 'confirmada'
-      ? (montoPendiente <= 0 ? 'pagado' : 'parcial')
-      : null;
+    const estadoPago = estado === 'confirmada' ? ((montoTotalNum - montoPagadoNum) <= 0 ? 'pagado' : 'parcial') : null;
 
-    const nuevaCita = await pool.query(
-      `INSERT INTO appointments
-        (patient_id, professional_id, area_id, fecha, hora, modalidad,
-         sesion, total_sesiones, estado, servicio_nombre,
-         monto, monto_total, monto_pagado,
-         metodo_pago, estado_pago, fecha_pago, notas, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-       RETURNING id`,
-      [
-        patient_id,
-        professional_id,
-        area_id,
-        fecha,
-        hora,
-        modalidad || 'presencial',
-        sesion || 1,
-        total_sesiones || 1,
-        estado || 'pendiente',
-        servicio_nombre || null,
-        montoPagadoNum || null,
-        montoTotalNum || null,
-        montoPagadoNum || null,
-        metodo_pago || null,
-        estadoPago,
-        estado === 'confirmada' ? new Date().toISOString().split('T')[0] : null,
-        notas || null,
-        req.usuario!.id,
-      ]
-    );
+    let numeroCiclo = ciclo ? parseInt(ciclo) : null;
+    if (!numeroCiclo) {
+      const maxCiclo = await pool.query(
+        `SELECT COALESCE(MAX(ciclo), 0) as max_ciclo FROM appointments WHERE patient_id=$1 AND area_id=$2`,
+        [patient_id, area_id]
+      );
+      numeroCiclo = maxCiclo.rows[0].max_ciclo + 1;
+    }
 
-    const nuevaId = nuevaCita.rows[0].id;
+    // Busca esta parte:
+const nuevaCita = await pool.query(
+  `INSERT INTO appointments
+    (patient_id, professional_id, area_id, fecha, hora, modalidad,
+     sesion, total_sesiones, ciclo, estado, servicio_nombre,
+     monto, monto_total, monto_pagado, metodo_pago, estado_pago,
+     fecha_pago, notas, duracion_min, created_by)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+   RETURNING id`,
+  [
+    patient_id, professional_id, area_id, fecha, hora, modalidad || 'presencial',
+    sesion || 1, total_sesiones || 1, numeroCiclo, estado || 'pendiente',
+    servicio_nombre || null, montoPagadoNum || null, montoTotalNum || null,
+    montoPagadoNum || null, metodo_pago || null, estadoPago,
+    estado === 'confirmada' ? new Date().toISOString().split('T')[0] : null,
+    notas || null, duracion_min || null, // ✅ AGREGAR
+    req.usuario!.id,
+  ]
+);
 
     await registrarAudit({
-      tabla: 'appointments',
-      registro_id: nuevaId,
-      accion: 'crear',
-      datos_despues: { paciente_nombre, professional_id, area_id, fecha, hora, estado },
-      user_id: req.usuario!.id,
-      user_nombre: req.usuario!.rol,
-      user_rol: req.usuario!.rol,
-      ip: req.ip,
+      tabla: 'appointments', registro_id: nuevaCita.rows[0].id, accion: 'crear',
+      datos_despues: { paciente_nombre, professional_id, area_id, fecha, hora, estado, ciclo: numeroCiclo },
+      user_id: req.usuario!.id, user_nombre: req.usuario!.rol, user_rol: req.usuario!.rol, ip: req.ip,
     });
 
-    res.status(201).json({
-      ok: true,
-      mensaje: 'Cita creada correctamente',
-      id: nuevaId,
-    });
+    res.status(201).json({ ok: true, mensaje: 'Cita creada correctamente', id: nuevaCita.rows[0].id });
   } catch (error) {
     console.error('Error al crear cita:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al crear cita' });
+  }
+}
+
+export async function crearMultiplesCitasController(
+  req: RequestConUsuario,
+  res: Response
+): Promise<void> {
+  try {
+    const sesiones: any[] = req.body;
+    if (!Array.isArray(sesiones) || sesiones.length === 0) {
+      res.status(400).json({ ok: false, mensaje: 'No se enviaron sesiones' });
+      return;
+    }
+
+    const primera = sesiones[0];
+
+    // Resolver patient_id
+    let patient_id: number;
+    if (primera.patient_id) {
+      patient_id = primera.patient_id;
+      await pool.query(
+        `UPDATE patients SET nombre=$1, carnet=$2, edad=$3 WHERE id=$4`,
+        [primera.paciente_nombre, primera.paciente_carnet || null, primera.paciente_edad || null, patient_id]
+      );
+    } else if (primera.paciente_telefono) {
+      const existe = await pool.query(`SELECT id FROM patients WHERE telefono=$1`, [primera.paciente_telefono]);
+      if (existe.rows.length > 0) {
+        patient_id = existe.rows[0].id;
+        await pool.query(
+          `UPDATE patients SET nombre=$1, carnet=$2, edad=$3, updated_by=$4 WHERE id=$5`,
+          [primera.paciente_nombre, primera.paciente_carnet || null, primera.paciente_edad || null, req.usuario!.id, patient_id]
+        );
+      } else {
+        const nuevo = await pool.query(
+          `INSERT INTO patients (nombre, carnet, telefono, edad, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+          [primera.paciente_nombre, primera.paciente_carnet || null, primera.paciente_telefono, primera.paciente_edad || null, req.usuario!.id]
+        );
+        patient_id = nuevo.rows[0].id;
+      }
+    } else {
+      const nuevo = await pool.query(
+        `INSERT INTO patients (nombre, carnet, telefono, edad, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [primera.paciente_nombre, primera.paciente_carnet || null, null, primera.paciente_edad || null, req.usuario!.id]
+      );
+      patient_id = nuevo.rows[0].id;
+    }
+
+    // Calcular ciclo UNA sola vez para todas las sesiones
+    const cicloExplicito = primera.ciclo ? parseInt(primera.ciclo) : null;
+    let numeroCiclo: number;
+    if (cicloExplicito) {
+      numeroCiclo = cicloExplicito;
+    } else {
+      const maxCiclo = await pool.query(
+        `SELECT COALESCE(MAX(ciclo), 0) as max_ciclo FROM appointments WHERE patient_id=$1 AND area_id=$2`,
+        [patient_id, primera.area_id]
+      );
+      numeroCiclo = maxCiclo.rows[0].max_ciclo + 1;
+    }
+
+    // Verificar conflictos
+    for (const s of sesiones) {
+      const conflicto = await pool.query(
+        `SELECT id FROM appointments WHERE professional_id=$1 AND fecha=$2 AND hora=$3 AND estado!='cancelada'`,
+        [s.professional_id, s.fecha, s.hora]
+      );
+      if (conflicto.rows.length > 0) {
+        res.status(409).json({ ok: false, mensaje: `El profesional ya tiene una cita a las ${s.hora} ese dia` });
+        return;
+      }
+    }
+
+    // Insertar todas en secuencia con el mismo ciclo y patient_id
+    const ids: number[] = [];
+    for (const s of sesiones) {
+      const montoTotal = s.monto_total ? Number(s.monto_total) : 0;
+      const montoPagado = s.monto_pagado ? Number(s.monto_pagado) : 0;
+      const estadoPago = s.estado === 'confirmada' ? ((montoTotal - montoPagado) <= 0 ? 'pagado' : 'parcial') : null;
+
+      const nueva = await pool.query(
+  `INSERT INTO appointments
+    (patient_id, professional_id, area_id, fecha, hora, modalidad,
+     sesion, total_sesiones, ciclo, estado, servicio_nombre,
+     monto, monto_total, monto_pagado, metodo_pago, estado_pago,
+     fecha_pago, notas, duracion_min, created_by)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+   RETURNING id`,
+  [
+    patient_id, s.professional_id, s.area_id, s.fecha, s.hora,
+    s.modalidad || 'presencial', s.sesion || 1, s.total_sesiones || sesiones.length,
+    numeroCiclo, s.estado || 'pendiente', s.servicio_nombre || null,
+    montoPagado || null, montoTotal || null, montoPagado || null,
+    s.metodo_pago || null, estadoPago,
+    s.estado === 'confirmada' ? new Date().toISOString().split('T')[0] : null,
+    s.notas || null, s.duracion_min || null, // ✅ AGREGAR
+    req.usuario!.id
+  ]
+);
+      ids.push(nueva.rows[0].id);
+    }
+
+    await registrarAudit({
+      tabla: 'appointments', registro_id: ids[0], accion: 'crear',
+      datos_despues: { total_sesiones: sesiones.length, ciclo: numeroCiclo, patient_id },
+      user_id: req.usuario!.id, user_nombre: req.usuario!.rol, user_rol: req.usuario!.rol, ip: req.ip,
+    });
+
+    res.status(201).json({ ok: true, mensaje: 'Citas creadas correctamente', ids });
+  } catch (error) {
+    console.error('Error al crear múltiples citas:', error);
+    res.status(500).json({ ok: false, mensaje: 'Error al crear citas' });
   }
 }
 
@@ -274,8 +350,7 @@ export async function actualizarCita(
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const { estado, asistio, monto, monto_total, monto_pagado, metodo_pago, estado_pago, notas, total_sesiones, servicio_nombre, modalidad, fecha, hora } = req.body;
-
+    const { estado, asistio, monto, monto_total, monto_pagado, metodo_pago, estado_pago, notas, total_sesiones, servicio_nombre, modalidad, fecha, hora, paciente_nombre, paciente_telefono, paciente_carnet, paciente_edad } = req.body;
     const montoTotalNum = monto_total != null ? Number(monto_total) : null;
     const montoPagadoNum = monto_pagado != null ? Number(monto_pagado) : null;
 
@@ -306,10 +381,8 @@ export async function actualizarCita(
        WHERE id = $15
        RETURNING id`,
       [
-        estado, asistio,
-        montoPagadoNum, montoTotalNum, montoPagadoNum,
-        metodo_pago, nuevoEstadoPago, notas,
-        total_sesiones, servicio_nombre, modalidad,
+        estado, asistio, montoPagadoNum, montoTotalNum, montoPagadoNum,
+        metodo_pago, nuevoEstadoPago, notas, total_sesiones, servicio_nombre, modalidad,
         req.usuario!.id, fecha, hora, id
       ]
     );
@@ -319,15 +392,20 @@ export async function actualizarCita(
       return;
     }
 
+    if (paciente_nombre || paciente_telefono || paciente_carnet || paciente_edad) {
+      await pool.query(
+        `UPDATE patients SET
+          nombre=COALESCE($1,nombre), telefono=COALESCE($2,telefono),
+          carnet=COALESCE($3,carnet), edad=COALESCE($4,edad), updated_at=NOW()
+         WHERE id=(SELECT patient_id FROM appointments WHERE id=$5)`,
+        [paciente_nombre || null, paciente_telefono || null, paciente_carnet || null, paciente_edad || null, id]
+      );
+    }
+
     await registrarAudit({
-      tabla: 'appointments',
-      registro_id: parseInt(id as string),
-      accion: 'editar',
-      datos_despues: req.body,
-      user_id: req.usuario!.id,
-      user_nombre: req.usuario!.rol,
-      user_rol: req.usuario!.rol,
-      ip: req.ip,
+      tabla: 'appointments', registro_id: parseInt(id as string), accion: 'editar',
+      datos_despues: req.body, user_id: req.usuario!.id,
+      user_nombre: req.usuario!.rol, user_rol: req.usuario!.rol, ip: req.ip,
     });
 
     res.json({ ok: true, mensaje: 'Cita actualizada correctamente' });
@@ -344,43 +422,23 @@ export async function eliminarCita(
   try {
     const { id } = req.params;
 
-    // Obtener el patient_id antes de eliminar
-    const citaData = await pool.query(
-      'SELECT patient_id FROM appointments WHERE id = $1',
-      [id]
-    );
-
+    const citaData = await pool.query('SELECT patient_id FROM appointments WHERE id=$1', [id]);
     if (citaData.rows.length === 0) {
       res.status(404).json({ ok: false, mensaje: 'Cita no encontrada' });
       return;
     }
 
     const patient_id = citaData.rows[0].patient_id;
+    await pool.query('DELETE FROM appointments WHERE id=$1', [id]);
 
-    // Eliminar la cita
-    await pool.query('DELETE FROM appointments WHERE id = $1', [id]);
-
-    // Verificar si el paciente tiene más citas
-    const otrasCitas = await pool.query(
-      'SELECT COUNT(*) as total FROM appointments WHERE patient_id = $1',
-      [patient_id]
-    );
-
-    const total = parseInt(otrasCitas.rows[0].total);
-
-    // Si no tiene más citas, eliminar el paciente
-    if (total === 0) {
-      await pool.query('DELETE FROM patients WHERE id = $1', [patient_id]);
+    const otrasCitas = await pool.query('SELECT COUNT(*) as total FROM appointments WHERE patient_id=$1', [patient_id]);
+    if (parseInt(otrasCitas.rows[0].total) === 0) {
+      await pool.query('DELETE FROM patients WHERE id=$1', [patient_id]);
     }
 
     await registrarAudit({
-      tabla: 'appointments',
-      registro_id: parseInt(id as string),
-      accion: 'eliminar',
-      user_id: req.usuario!.id,
-      user_nombre: req.usuario!.rol,
-      user_rol: req.usuario!.rol,
-      ip: req.ip,
+      tabla: 'appointments', registro_id: parseInt(id as string), accion: 'eliminar',
+      user_id: req.usuario!.id, user_nombre: req.usuario!.rol, user_rol: req.usuario!.rol, ip: req.ip,
     });
 
     res.json({ ok: true, mensaje: 'Cita eliminada correctamente' });
