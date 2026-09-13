@@ -2,7 +2,7 @@ import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
-import { rutaPublicaSettings, eliminarArchivoLocal } from '../services/storage.service';
+import { subirImagenSettings, eliminarArchivo } from '../services/storage.service';
 
 // GET /api/site-settings  (admin)
 export async function getSettingsAdmin(
@@ -63,8 +63,8 @@ export async function actualizarSettings(
 
     let imagenUrl: string | null = actual.rows[0].imagen_edificio_url;
     if (req.file) {
-      eliminarArchivoLocal(imagenUrl);
-      imagenUrl = rutaPublicaSettings(req.file.filename);
+      await eliminarArchivo(imagenUrl);
+      imagenUrl = await subirImagenSettings(req.file);
     }
 
     const resultado = await pool.query(

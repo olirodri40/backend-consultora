@@ -2,7 +2,7 @@ import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
-import { rutaPublicaArchivo, eliminarArchivoLocal } from '../services/storage.service';
+import { subirArchivoGaleria, eliminarArchivo } from '../services/storage.service';
 
 // Con multer ya instalado, RequestConUsuario (que extiende Request de Express)
 // ya trae "file" automáticamente — no hace falta ningún tipo extra.
@@ -73,7 +73,7 @@ export async function crearItemGaleria(
         res.status(400).json({ ok: false, mensaje: 'Debes subir un archivo para este tipo de contenido' });
         return;
       }
-      archivoUrl = rutaPublicaArchivo(req.file.filename);
+      archivoUrl = await subirArchivoGaleria(req.file);
     } else if (!enlace_url) {
       res.status(400).json({ ok: false, mensaje: 'Debes proporcionar un enlace para este tipo de contenido' });
       return;
@@ -132,8 +132,8 @@ export async function actualizarItemGaleria(
     // Si viene un archivo nuevo, reemplaza el anterior y borra el viejo del disco
     let archivoUrl: string | null = actual.rows[0].archivo_url;
     if (req.file) {
-      eliminarArchivoLocal(archivoUrl);
-      archivoUrl = rutaPublicaArchivo(req.file.filename);
+      await eliminarArchivo(archivoUrl);
+      archivoUrl = await subirArchivoGaleria(req.file);
     }
 
     // FormData siempre manda strings; convertimos con cuidado y usamos
@@ -196,7 +196,7 @@ export async function eliminarItemGaleria(
       return;
     }
 
-    eliminarArchivoLocal(resultado.rows[0].archivo_url);
+    await eliminarArchivo(resultado.rows[0].archivo_url);
 
     await registrarAudit({
       tabla: 'site_gallery_items',

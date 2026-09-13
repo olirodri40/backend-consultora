@@ -2,7 +2,7 @@ import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
-import { rutaPublicaArticulo, eliminarArchivoLocal } from '../services/storage.service';
+import { subirArchivoArticulo, eliminarArchivo } from '../services/storage.service';
 
 const CATEGORIAS_VALIDAS = ['Fisioterapia', 'Medicina', 'Psicología'];
 
@@ -64,7 +64,7 @@ export async function crearArticulo(
       return;
     }
 
-    const imagenUrl = req.file ? rutaPublicaArticulo(req.file.filename) : null;
+    const imagenUrl = req.file ? await subirArchivoArticulo(req.file) : null;
 
     const resultado = await pool.query(
       `INSERT INTO site_articles (titulo, descripcion, contenido, categoria, imagen_url, publicado_en, orden, activo, creado_por)
@@ -125,8 +125,8 @@ export async function actualizarArticulo(
     // Si viene una imagen nueva, reemplaza la anterior y borra la vieja del disco
     let imagenUrl: string | null = actual.rows[0].imagen_url;
     if (req.file) {
-      eliminarArchivoLocal(imagenUrl);
-      imagenUrl = rutaPublicaArticulo(req.file.filename);
+      await eliminarArchivo(imagenUrl);
+      imagenUrl = await subirArchivoArticulo(req.file);
     }
 
     // FormData siempre manda strings; usamos null (no undefined) para
@@ -198,7 +198,7 @@ export async function eliminarArticulo(
       return;
     }
 
-    eliminarArchivoLocal(resultado.rows[0].imagen_url);
+    await eliminarArchivo(resultado.rows[0].imagen_url);
 
     await registrarAudit({
       tabla: 'site_articles',

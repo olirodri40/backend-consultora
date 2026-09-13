@@ -30,17 +30,25 @@ import notasRoutes from './routes/notas.routes';
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-// ✅ Configuración CORS para desarrollo
-// En vez de una lista fija de IPs (que se queda vieja apenas cambia el router/WiFi),
-// se acepta cualquier origen de localhost o de una IP de red local (192.168.x.x,
-// 10.x.x.x, 172.16-31.x.x) en los puertos del panel admin (5173) o del sitio
-// público (5500) — así cualquier otra PC/celular del mismo WiFi puede entrar
-// usando la IP de esta máquina, sin tocar este archivo cada vez.
+// ✅ Configuración CORS
+// En desarrollo se acepta cualquier origen de localhost o de una IP de red
+// local (192.168.x.x, 10.x.x.x, 172.16-31.x.x) en los puertos del panel admin
+// (5173) o del sitio público (5500) — así cualquier otra PC/celular del mismo
+// WiFi puede entrar usando la IP de esta máquina, sin tocar este archivo.
+//
+// En producción, los dominios reales (Vercel, dominio propio, etc.) se
+// agregan por variable de entorno ALLOWED_ORIGINS (separados por coma), sin
+// necesidad de tocar ni redesplegar código cuando cambian.
 const ORIGEN_LOCAL_PERMITIDO = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):(5173|5500)$/;
+
+const ORIGENES_PRODUCCION = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || ORIGEN_LOCAL_PERMITIDO.test(origin)) {
+    if (!origin || ORIGEN_LOCAL_PERMITIDO.test(origin) || ORIGENES_PRODUCCION.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('No permitido por CORS: ' + origin));
