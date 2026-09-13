@@ -7,8 +7,8 @@ console.log('✅ Rutas reportes cargadas - getProgresoTemporal:', typeof getProg
 
 const router = Router();
 
-router.get('/',        verificarToken, soloRol('administrador', 'supervisor'), getReporteGeneral);
-router.get('/pagos',   verificarToken, soloRol('administrador', 'supervisor'), getHistorialPagos);
+router.get('/',        verificarToken, soloRol('administrador'), getReporteGeneral);
+router.get('/pagos',   verificarToken, soloRol('administrador'), getHistorialPagos);
 router.get('/dashboard', verificarToken, getDashboard);
 router.get('/progreso-areas', verificarToken, getProgresoAreas);
 router.get('/progreso-temporal', verificarToken, getProgresoTemporal);

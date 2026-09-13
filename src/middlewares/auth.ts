@@ -7,6 +7,7 @@ export interface RequestConUsuario extends Request {
     id: number;
     rol: string;
     area_id: number | null;
+    areas?: string[];
   };
 }
 
@@ -31,6 +32,7 @@ export function verificarToken(
       id: number;
       rol: string;
       area_id: number | null;
+      areas?: string[];
     };
 
     // Agregar el usuario al request para usarlo en los controladores

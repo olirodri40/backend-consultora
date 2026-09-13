@@ -1,25 +1,47 @@
 import { Router } from 'express';
+import { verificarToken } from '../middlewares/auth';
 import {
   getActividades,
-  getParticipantes,
+  getParticipantesConFiltro,
   crearParticipante,
   renovarCiclo,
   marcarAsistencia,
   getAsistencia,
   eliminarParticipante,
   editarParticipante,
+  getHistorialCiclosGeronto,
+  actualizarPagoCicloGeronto,
+  getReportesGeronto,
+  eliminarAsistenciaGeronto,
+  getActividadesConProfesionales,
 } from '../controllers/geronto.controller';
-import { verificarToken, soloRol } from '../middlewares/auth';
 
 const router = Router();
 
-router.get('/actividades',                verificarToken, getActividades);
-router.get('/participantes',              verificarToken, getParticipantes);
-router.post('/participantes',             verificarToken, soloRol('administrador', 'profesional'), crearParticipante);
-router.put('/participantes/:id/renovar',  verificarToken, soloRol('administrador', 'profesional'), renovarCiclo);
-router.put('/participantes/:id',          verificarToken, soloRol('administrador', 'profesional'), editarParticipante);
-router.delete('/participantes/:id',       verificarToken, soloRol('administrador'), eliminarParticipante);
-router.post('/asistencia',                verificarToken, marcarAsistencia);
-router.get('/asistencia/:cycle_id',       verificarToken, getAsistencia);
+// ========== ACTIVIDADES ==========
+router.get('/actividades', getActividades);
+router.get('/actividades-con-profesionales', getActividadesConProfesionales);
+
+// ========== PARTICIPANTES ==========
+router.get('/participantes', verificarToken, getParticipantesConFiltro); 
+router.get('/participantes', getParticipantesConFiltro);
+router.post('/participantes', crearParticipante);
+router.put('/participantes/:id', editarParticipante);
+router.delete('/participantes/:id', eliminarParticipante);
+
+
+// ========== CICLOS ==========
+router.put('/participantes/:id/renovar', renovarCiclo);
+router.get('/participantes/:id/ciclos', getHistorialCiclosGeronto);
+router.put('/ciclos/:id/pago', actualizarPagoCicloGeronto);
+
+// ========== ASISTENCIA ==========
+router.post('/asistencia', marcarAsistencia);
+router.delete('/asistencia', eliminarAsistenciaGeronto);
+router.get('/asistencia/:cycle_id', getAsistencia);
+
+// ========== REPORTES ==========
+router.get('/reportes', getReportesGeronto);
+
 
 export default router;

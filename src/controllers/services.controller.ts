@@ -17,10 +17,13 @@ export async function getServicios(
     let query = `
       SELECT
         s.id, s.nombre, s.descripcion, s.costo,
-        s.duracion_min, s.activo, s.created_at,
-        a.id as area_id, a.nombre as area_nombre, a.emoji as area_emoji
+        s.costo_descuento, s.descripcion_descuento,
+        s.duracion_min, s.activo, s.visible_publico, s.created_at,
+        a.id as area_id, a.nombre as area_nombre,
+        sec.id as seccion_id, sec.nombre as seccion_nombre
        FROM services s
        JOIN areas a ON s.area_id = a.id
+       LEFT JOIN area_secciones sec ON s.seccion_id = sec.id
        WHERE 1=1
     `;
 
@@ -45,17 +48,27 @@ export async function crearServicio(
   res: Response
 ): Promise<void> {
   try {
-    const { area_id, nombre, descripcion, costo, duracion_min } = req.body;
+    const { area_id, seccion_id, nombre, descripcion, costo, costo_descuento, descripcion_descuento, duracion_min } = req.body;
 
     if (!area_id || !nombre) {
       res.status(400).json({ ok: false, mensaje: 'Area y nombre son obligatorios' });
       return;
     }
 
+    // Si el área tiene secciones registradas, exigir que se elija una
+    const seccionesArea = await pool.query(
+      'SELECT COUNT(*) as total FROM area_secciones WHERE area_id = $1',
+      [area_id]
+    );
+    if (parseInt(seccionesArea.rows[0].total) > 0 && !seccion_id) {
+      res.status(400).json({ ok: false, mensaje: 'Debes seleccionar una sección para esta área' });
+      return;
+    }
+
     const resultado = await pool.query(
-      `INSERT INTO services (area_id, nombre, descripcion, costo, duracion_min)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [area_id, nombre, descripcion || null, costo || null, duracion_min || null]
+      `INSERT INTO services (area_id, seccion_id, nombre, descripcion, costo, costo_descuento, descripcion_descuento, duracion_min)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [area_id, seccion_id || null, nombre, descripcion || null, costo || null, costo_descuento || null, descripcion_descuento || null, duracion_min || null]
     );
 
     const nuevoId = resultado.rows[0].id;
@@ -84,17 +97,21 @@ export async function actualizarServicio(
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const { nombre, descripcion, costo, duracion_min, activo } = req.body;
+    const { nombre, descripcion, costo, costo_descuento, descripcion_descuento, duracion_min, activo, seccion_id, visible_publico } = req.body;
 
     const resultado = await pool.query(
       `UPDATE services SET
-        nombre       = COALESCE($1, nombre),
-        descripcion  = COALESCE($2, descripcion),
-        costo        = COALESCE($3, costo),
-        duracion_min = COALESCE($4, duracion_min),
-        activo       = COALESCE($5, activo)
-       WHERE id = $6 RETURNING id`,
-      [nombre, descripcion, costo, duracion_min, activo, id]
+        nombre                 = COALESCE($1, nombre),
+        descripcion            = COALESCE($2, descripcion),
+        costo                  = COALESCE($3, costo),
+        costo_descuento        = $4,
+        descripcion_descuento  = $5,
+        duracion_min           = COALESCE($6, duracion_min),
+        activo                 = COALESCE($7, activo),
+        seccion_id             = COALESCE($8, seccion_id),
+        visible_publico        = COALESCE($9, visible_publico)
+       WHERE id = $10 RETURNING id`,
+      [nombre, descripcion, costo, costo_descuento ?? null, descripcion_descuento ?? null, duracion_min, activo, seccion_id ?? null, visible_publico, id]
     );
 
     if (resultado.rows.length === 0) {
@@ -277,9 +294,9 @@ export async function getActividadesAdmin(
 ): Promise<void> {
   try {
     const resultado = await pool.query(
-      `SELECT id, nombre, emoji, dia,
+      `SELECT id, nombre, dia,
         hora_inicio::text, hora_fin::text,
-        color, precio, activo
+         precio, activo
        FROM geronto_activities
        ORDER BY
          CASE dia
@@ -304,7 +321,7 @@ export async function crearActividadGeronto(
   res: Response
 ): Promise<void> {
   try {
-    const { nombre, emoji, dia, hora_inicio, hora_fin, color, precio } = req.body;
+    const { nombre, dia, hora_inicio, hora_fin, precio } = req.body;
 
     if (!nombre || !dia || !hora_inicio || !hora_fin) {
       res.status(400).json({
@@ -316,9 +333,9 @@ export async function crearActividadGeronto(
 
     const resultado = await pool.query(
       `INSERT INTO geronto_activities
-        (nombre, emoji, dia, hora_inicio, hora_fin, color, precio)
+        (nombre, dia, hora_inicio, hora_fin, precio)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [nombre, emoji || null, dia, hora_inicio, hora_fin, color || 'emerald', precio || 75]
+      [nombre, dia, hora_inicio, hora_fin, precio || 75]
     );
 
     res.status(201).json({
@@ -338,20 +355,18 @@ export async function actualizarActividadGeronto(
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const { nombre, emoji, dia, hora_inicio, hora_fin, color, precio, activo } = req.body;
+    const { nombre, dia, hora_inicio, hora_fin, precio, activo } = req.body;
 
     const resultado = await pool.query(
       `UPDATE geronto_activities SET
         nombre      = COALESCE($1, nombre),
-        emoji       = COALESCE($2, emoji),
-        dia         = COALESCE($3, dia),
-        hora_inicio = COALESCE($4, hora_inicio),
-        hora_fin    = COALESCE($5, hora_fin),
-        color       = COALESCE($6, color),
-        precio      = COALESCE($7, precio),
-        activo      = COALESCE($8, activo)
-       WHERE id = $9 RETURNING id`,
-      [nombre, emoji, dia, hora_inicio, hora_fin, color, precio, activo, id]
+        dia         = COALESCE($2, dia),
+        hora_inicio = COALESCE($3, hora_inicio),
+        hora_fin    = COALESCE($4, hora_fin),
+        precio      = COALESCE($5, precio),
+        activo      = COALESCE($6, activo)
+       WHERE id = $7 RETURNING id`,
+      [nombre, dia, hora_inicio, hora_fin,  precio, activo, id]
     );
 
     if (resultado.rows.length === 0) {
