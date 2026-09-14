@@ -213,9 +213,12 @@ export async function getCuposPublicos(req: RequestConUsuario, res: Response): P
         return;
       }
       const horaInicio = sesionGrupal.hora_inicio.slice(0, 5);
-      if (yaPaso(String(fecha), horaInicio)) {
+      const yaPasoGrupal = yaPaso(String(fecha), horaInicio);
+      if (yaPasoGrupal) {
+        // Se sigue mostrando (para que el visitante vea que ese día sí hay
+        // sesión, a esa hora) pero sin poder reservarla.
         res.set('Cache-Control', 'no-store');
-        res.json({ ok: true, horarios: [] });
+        res.json({ ok: true, horarios: [{ hora: horaInicio, cupos: 0, esGrupal: true, pasado: true }] });
         return;
       }
       const ocupadosRes = await pool.query(
@@ -231,7 +234,7 @@ export async function getCuposPublicos(req: RequestConUsuario, res: Response): P
       const ocupados = parseInt(ocupadosRes.rows[0].total, 10) + parseInt(pendientesRes.rows[0].total, 10);
       const cupos = Math.max(0, sesionGrupal.capacidad - ocupados);
       res.set('Cache-Control', 'no-store');
-      res.json({ ok: true, horarios: [{ hora: horaInicio, cupos, esGrupal: true }] });
+      res.json({ ok: true, horarios: [{ hora: horaInicio, cupos, esGrupal: true, pasado: false }] });
       return;
     }
 
@@ -246,13 +249,21 @@ export async function getCuposPublicos(req: RequestConUsuario, res: Response): P
     const pendientesPorHora: Record<string, number> = {};
     for (const r of pendientesRes.rows) pendientesPorHora[r.hora.slice(0, 5)] = parseInt(r.total, 10);
 
+    // Se devuelve la jornada COMPLETA del día (todos los horarios de todos los
+    // profesionales que dan el servicio), no solo los que se pueden reservar:
+    // los ocupados van con 0 cupos y los que ya pasaron van marcados con
+    // `pasado`. Así el visitante ve el horario real de atención en vez de una
+    // lista recortada que parece que "casi no hay horarios".
     const horarios = Object.keys(contador)
-      .filter((hora) => !yaPaso(String(fecha), hora))
       .sort()
-      .map((hora) => ({
-        hora,
-        cupos: Math.max(0, contador[hora] - (pendientesPorHora[hora] || 0)),
-      }));
+      .map((hora) => {
+        const pasado = yaPaso(String(fecha), hora);
+        return {
+          hora,
+          cupos: pasado ? 0 : Math.max(0, contador[hora] - (pendientesPorHora[hora] || 0)),
+          pasado,
+        };
+      });
 
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, horarios });
