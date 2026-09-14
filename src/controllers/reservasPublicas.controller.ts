@@ -264,7 +264,10 @@ export async function getCuposPublicos(req: RequestConUsuario, res: Response): P
 // POST /api/reservas-publicas  (sin auth — sitio web público)
 export async function crearReservaPublica(req: RequestConUsuario, res: Response): Promise<void> {
   try {
-    const { servicio_id, fecha, hora, paciente_nombre, paciente_telefono, paciente_email, notas } = req.body;
+    const {
+      servicio_id, fecha, hora, paciente_nombre, paciente_telefono, paciente_email,
+      paciente_carnet, paciente_edad, notas,
+    } = req.body;
 
     if (!servicio_id || !fecha || !hora || !paciente_nombre || !paciente_telefono) {
       res.status(400).json({ ok: false, mensaje: 'Faltan datos obligatorios de la reserva' });
@@ -330,11 +333,24 @@ export async function crearReservaPublica(req: RequestConUsuario, res: Response)
       }
     }
 
+    // La edad llega como texto desde el formulario web; se guarda como número
+    // (o null si vino vacía/inválida) porque la columna es INTEGER.
+    const edadNumero = paciente_edad !== undefined && paciente_edad !== null && String(paciente_edad).trim() !== ''
+      ? Number(paciente_edad)
+      : null;
+
     const nueva = await pool.query(
       `INSERT INTO reservas_publicas
-        (area_id, servicio_id, fecha, hora, paciente_nombre, paciente_telefono, paciente_email, notas)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [areaId, servicio_id, fecha, hora, paciente_nombre, paciente_telefono, paciente_email || null, notas || null]
+        (area_id, servicio_id, fecha, hora, paciente_nombre, paciente_telefono, paciente_email,
+         paciente_carnet, paciente_edad, notas)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [
+        areaId, servicio_id, fecha, hora, paciente_nombre, paciente_telefono,
+        paciente_email || null,
+        paciente_carnet || null,
+        Number.isFinite(edadNumero as number) ? edadNumero : null,
+        notas || null,
+      ]
     );
 
     res.status(201).json({
@@ -353,7 +369,8 @@ export async function getReservasPendientes(req: RequestConUsuario, res: Respons
   try {
     const resultado = await pool.query(
       `SELECT rp.id, rp.fecha, rp.hora::text, rp.paciente_nombre, rp.paciente_telefono,
-              rp.paciente_email, rp.notas, rp.estado, rp.created_at,
+              rp.paciente_email, rp.paciente_carnet, rp.paciente_edad, rp.notas,
+              rp.estado, rp.created_at,
               s.id as servicio_id, s.nombre as servicio_nombre, s.costo,
               ar.id as area_id, ar.nombre as area_nombre
        FROM reservas_publicas rp
@@ -508,14 +525,35 @@ export async function confirmarReservaPublica(req: RequestConUsuario, res: Respo
       }
     }
 
+    // El carnet y la edad que dejó el paciente en el sitio web van a SU FICHA
+    // (patients.carnet / patients.edad), no a las notas de la cita.
     let patient_id: number;
     const existente = await pool.query(`SELECT id FROM patients WHERE telefono = $1`, [reserva.paciente_telefono]);
     if (existente.rows.length > 0) {
       patient_id = existente.rows[0].id;
+      // Paciente que ya existía: completamos solo los datos que le faltaban,
+      // sin pisar lo que recepción ya haya cargado a mano (COALESCE mantiene
+      // el valor actual si no está vacío).
+      await pool.query(
+        `UPDATE patients SET
+           carnet = COALESCE(NULLIF(carnet, ''), $1),
+           edad   = COALESCE(edad, $2),
+           updated_at = NOW(),
+           updated_by = $3
+         WHERE id = $4`,
+        [reserva.paciente_carnet || null, reserva.paciente_edad ?? null, req.usuario!.id, patient_id]
+      );
     } else {
       const nuevoPaciente = await pool.query(
-        `INSERT INTO patients (nombre, telefono, created_by) VALUES ($1, $2, $3) RETURNING id`,
-        [reserva.paciente_nombre, reserva.paciente_telefono, req.usuario!.id]
+        `INSERT INTO patients (nombre, telefono, carnet, edad, created_by)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [
+          reserva.paciente_nombre,
+          reserva.paciente_telefono,
+          reserva.paciente_carnet || null,
+          reserva.paciente_edad ?? null,
+          req.usuario!.id,
+        ]
       );
       patient_id = nuevoPaciente.rows[0].id;
     }
@@ -543,7 +581,9 @@ export async function confirmarReservaPublica(req: RequestConUsuario, res: Respo
         numeroCiclo,
         servicio?.nombre || null,
         montoFinal || null,
-        `Reservado desde el sitio web público.${reserva.notas ? ' Notas: ' + reserva.notas : ''}`,
+        // Solo lo que el paciente escribió en "Notas" del sitio web — el carnet
+        // y la edad ya quedaron en su ficha, no se repiten acá.
+        reserva.notas || null,
         servicio?.duracion_min || null,
         req.usuario!.id,
       ]
@@ -583,7 +623,8 @@ export async function getReservasHistorial(req: RequestConUsuario, res: Response
   try {
     const resultado = await pool.query(
       `SELECT rp.id, rp.fecha, rp.hora::text, rp.paciente_nombre, rp.paciente_telefono,
-              rp.paciente_email, rp.notas, rp.estado, rp.created_at, rp.confirmado_at,
+              rp.paciente_email, rp.paciente_carnet, rp.paciente_edad, rp.notas,
+              rp.estado, rp.created_at, rp.confirmado_at,
               s.id as servicio_id, s.nombre as servicio_nombre, s.costo,
               ar.id as area_id, ar.nombre as area_nombre,
               u.id as professional_id, u.nombre as professional_nombre
