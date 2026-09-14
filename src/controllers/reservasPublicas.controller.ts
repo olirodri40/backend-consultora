@@ -3,6 +3,7 @@ import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
 import { variantesDia } from '../utils/dias';
+import { fechaHoy, horaAhora } from '../utils/tiempo';
 import { notificarNuevaReservaWeb } from '../services/notificaciones.services';
 
 type FilaDisponibilidad = {
@@ -42,13 +43,14 @@ function aHoraStr(minutos: number): string {
 
 // true si fecha+hora ya pasó respecto a ahora — evita reservar horarios de hoy
 // que ya vencieron (ej. son las 12:00 y el visitante intenta las 08:00 de hoy).
+// Se compara contra la hora de Bolivia, no la del servidor: Render corre en
+// UTC (4 horas adelante), así que usar la hora del servidor daba por vencidos
+// horarios que todavía faltaban.
 function yaPaso(fecha: string, horaStr: string): boolean {
-  const ahora = new Date();
-  const hoy = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
+  const hoy = fechaHoy();
   if (fecha < hoy) return true;
   if (fecha > hoy) return false;
-  const horaActual = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
-  return horaStr <= horaActual;
+  return horaStr <= horaAhora();
 }
 
 type Bloqueo = { inicio: number; fin: number };

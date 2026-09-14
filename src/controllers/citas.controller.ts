@@ -5,6 +5,7 @@ import { registrarAudit } from '../db/audit';
 
 import { notificarNuevaCita, notificarReagendamiento } from '../services/notificaciones.services';
 import { nombreDelDia } from '../utils/dias';
+import { fechaHoy } from '../utils/tiempo';
 
 // Un curso/capacitación/seminario (bloqueos_agenda) deja al profesional
 // completamente ocupado en ese rango — se valida en toda creación/reagenda
@@ -303,7 +304,7 @@ export async function crearCita(
         sesion || 1, total_sesiones || 1, numeroCiclo, estado || 'pendiente',
         servicio_nombre || null, montoPagadoNum || null, montoTotalNum || null,
         montoPagadoNum || null, metodo_pago || null, estadoPago,
-        estado === 'confirmada' ? new Date().toISOString().split('T')[0] : null,
+        estado === 'confirmada' ? fechaHoy() : null,
         notas || null, duracion_min || null,
         req.usuario!.id,
       ]
@@ -503,7 +504,7 @@ export async function crearMultiplesCitasController(
           numeroCiclo, s.estado || 'pendiente', s.servicio_nombre || null,
           montoPagado || null, montoTotal || null, montoPagado || null,
           s.metodo_pago || null, estadoPago,
-          s.estado === 'confirmada' ? new Date().toISOString().split('T')[0] : null,
+          s.estado === 'confirmada' ? fechaHoy() : null,
           s.notas || null, s.duracion_min || null,
           req.usuario!.id, grupoIdParaInsertar,
         ]
@@ -836,7 +837,7 @@ export async function crearCitaGrupal(
             esPrimeraSesion ? (montoPagadoNum || null) : null,
             esPrimeraSesion ? (metodo_pago || null) : null,
             esPrimeraSesion ? estadoPago : null,
-            esPrimeraSesion && estado === 'confirmada' ? new Date().toISOString().split('T')[0] : null,
+            esPrimeraSesion && estado === 'confirmada' ? fechaHoy() : null,
             notas || null, duracion_min || null, req.usuario!.id,
             grupoIdSesion,
           ]

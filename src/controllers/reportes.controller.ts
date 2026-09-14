@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
+import { diaDeLaSemanaHoy } from '../utils/tiempo';
 
 // Helper: decide si el filtro es solo año ('YYYY') o año+mes ('YYYY-MM')
 function formatoDeFecha(valor: string): string {
@@ -260,11 +261,9 @@ export async function getDashboard(
   res: Response
 ): Promise<void> {
   try {
-    const diasSemana: Record<number, string> = {
-      0: 'Domingo', 1: 'Lunes', 2: 'Martes', 3: 'Miercoles',
-      4: 'Jueves', 5: 'Viernes', 6: 'Sabado'
-    };
-    const diaNombre = diasSemana[new Date().getDay()];
+    // Día de hoy en Bolivia (no en la zona del servidor, que en Render es UTC
+    // y cambiaría de día a las 20:00 hora boliviana).
+    const diaNombre = diaDeLaSemanaHoy();
 
         // 👇 Si es profesional: filtra por su(s) área(s) Y por que la cita sea suya
     // (antes solo filtraba por área, mostrando pacientes de otros profesionales

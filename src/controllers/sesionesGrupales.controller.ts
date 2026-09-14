@@ -3,6 +3,7 @@ import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
 import { nombreDelDia, mismoDia } from '../utils/dias';
+import { fechaHoy } from '../utils/tiempo';
 
 const DIAS_VALIDOS = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Miércoles', 'Jueves', 'Viernes', 'Sabado', 'Sábado'];
 
@@ -69,7 +70,7 @@ export async function crearSesionGrupal(req: RequestConUsuario, res: Response): 
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
       [
         professional_id, servicio_id, servicio_individual_id || null, area_id, dia, hora_inicio, hora_fin,
-        fecha_inicio || new Date().toISOString().slice(0, 10),
+        fecha_inicio || fechaHoy(),
         capacidad && capacidad > 0 ? capacidad : 5,
         costo_grupal ?? null,
         visible_publico !== false,
