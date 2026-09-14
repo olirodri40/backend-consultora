@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
+import { HOY_SQL } from '../utils/tiempo';
 
 export async function getParticipantes(
   req: RequestConUsuario,
@@ -73,7 +74,7 @@ export async function getParticipantes(
         COUNT(a.id) FILTER (WHERE a.estado = 'permiso')  as clases_permiso,
         EXISTS (
           SELECT 1 FROM zumba_attendance za
-          WHERE za.cycle_id = c.id AND za.fecha = CURRENT_DATE
+          WHERE za.cycle_id = c.id AND za.fecha = ${HOY_SQL}
         ) as marcado_hoy
               FROM zumba_participants p
        LEFT JOIN LATERAL (

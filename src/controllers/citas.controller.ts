@@ -5,7 +5,7 @@ import { registrarAudit } from '../db/audit';
 
 import { notificarNuevaCita, notificarReagendamiento } from '../services/notificaciones.services';
 import { nombreDelDia } from '../utils/dias';
-import { fechaHoy } from '../utils/tiempo';
+import { fechaHoy, HOY_SQL } from '../utils/tiempo';
 
 // Un curso/capacitación/seminario (bloqueos_agenda) deja al profesional
 // completamente ocupado en ese rango — se valida en toda creación/reagenda
@@ -589,7 +589,7 @@ const citaAnteriorResult = await pool.query(
      fecha           = COALESCE($13, fecha),
      hora            = COALESCE($14, hora),
      duracion_min    = COALESCE($15, duracion_min), 
-     fecha_pago      = CASE WHEN $1 = 'confirmada' AND fecha_pago IS NULL THEN CURRENT_DATE ELSE fecha_pago END,
+     fecha_pago      = CASE WHEN $1 = 'confirmada' AND fecha_pago IS NULL THEN ${HOY_SQL} ELSE fecha_pago END,
      updated_at      = NOW()
    WHERE id = $16
    RETURNING id`,

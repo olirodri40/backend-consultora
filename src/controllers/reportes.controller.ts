@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
-import { diaDeLaSemanaHoy } from '../utils/tiempo';
+import { diaDeLaSemanaHoy, HOY_SQL } from '../utils/tiempo';
 
 // Helper: decide si el filtro es solo año ('YYYY') o año+mes ('YYYY-MM')
 function formatoDeFecha(valor: string): string {
@@ -86,7 +86,7 @@ export async function getReporteGeneral(
       paramsCitas.push(anio);
       condCitas = `TO_CHAR(fecha, 'YYYY') = $1 AND estado = 'confirmada'`;
     } else {
-      condCitas = `fecha = CURRENT_DATE AND estado = 'confirmada'`;
+      condCitas = `fecha = ${HOY_SQL} AND estado = 'confirmada'`;
     }
     const citasPeriodo = await pool.query(
       `SELECT COUNT(*) as total FROM appointments WHERE ${condCitas}`,
@@ -297,7 +297,7 @@ export async function getDashboard(
        JOIN patients p  ON a.patient_id      = p.id
        JOIN users u     ON a.professional_id = u.id
        JOIN areas ar    ON a.area_id         = ar.id
-       WHERE a.fecha = CURRENT_DATE
+       WHERE a.fecha = ${HOY_SQL}
        ${filtroArea}
        ORDER BY a.hora ASC`,
       paramsArea
@@ -326,7 +326,7 @@ export async function getDashboard(
        JOIN patients p  ON a.patient_id      = p.id
        JOIN users u     ON a.professional_id = u.id
        JOIN areas ar    ON a.area_id         = ar.id
-       WHERE a.fecha = CURRENT_DATE + INTERVAL '1 day'
+       WHERE a.fecha = ${HOY_SQL} + INTERVAL '1 day'
        ${filtroArea}
        ORDER BY a.hora ASC`,
       paramsArea
@@ -335,13 +335,13 @@ export async function getDashboard(
     const ingresosHoySalud = await pool.query(
   `SELECT COALESCE(SUM(a.monto_pagado), 0) as total
    FROM appointments a
-   WHERE a.fecha = CURRENT_DATE AND a.estado = 'confirmada' AND a.sesion::text = '1'`
+   WHERE a.fecha = ${HOY_SQL} AND a.estado = 'confirmada' AND a.sesion::text = '1'`
 );
 
 const ingresosMesSalud = await pool.query(
   `SELECT COALESCE(SUM(a.monto_pagado), 0) as total
    FROM appointments a
-   WHERE TO_CHAR(a.fecha, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+   WHERE TO_CHAR(a.fecha, 'YYYY-MM') = TO_CHAR(${HOY_SQL}, 'YYYY-MM')
    AND a.estado = 'confirmada' AND a.sesion::text = '1'`
 );
 
@@ -350,7 +350,7 @@ const ingresosMesSalud = await pool.query(
        FROM zumba_cycles zc
        JOIN zumba_participants zp ON zp.id = zc.participant_id
        WHERE zp.activo = true
-       AND TO_CHAR(zc.fecha_inicio, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')`
+       AND TO_CHAR(zc.fecha_inicio, 'YYYY-MM') = TO_CHAR(${HOY_SQL}, 'YYYY-MM')`
     );
 
     const ingresosMesGeronto = await pool.query(
@@ -358,7 +358,7 @@ const ingresosMesSalud = await pool.query(
        FROM geronto_cycles gc
        JOIN geronto_participants gp ON gp.id = gc.participant_id
        WHERE gp.activo = true
-       AND TO_CHAR(gc.fecha_inicio, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')`
+       AND TO_CHAR(gc.fecha_inicio, 'YYYY-MM') = TO_CHAR(${HOY_SQL}, 'YYYY-MM')`
     );
 
     // 👇 También filtrado, para no mostrarle a un profesional
@@ -373,7 +373,7 @@ const ingresosMesSalud = await pool.query(
        JOIN patients p  ON a.patient_id      = p.id
        JOIN users u     ON a.professional_id = u.id
        JOIN areas ar    ON a.area_id         = ar.id
-       WHERE a.fecha = CURRENT_DATE
+       WHERE a.fecha = ${HOY_SQL}
        AND a.estado = 'confirmada'
        AND a.sesion::text = a.total_sesiones::text
        ${filtroArea}`,
@@ -388,7 +388,7 @@ const ingresosMesSalud = await pool.query(
        FROM appointments a
        JOIN users u  ON a.professional_id = u.id
        JOIN areas ar ON a.area_id = ar.id
-       WHERE a.fecha = CURRENT_DATE
+       WHERE a.fecha = ${HOY_SQL}
        ${filtroArea}
        GROUP BY u.id, u.nombre, ar.nombre
        ORDER BY total_citas DESC`,
@@ -410,7 +410,7 @@ const ingresosMesSalud = await pool.query(
        FROM zumba_cycles zc
        JOIN zumba_participants zp ON zc.participant_id = zp.id
        WHERE zp.activo = true
-       AND TO_CHAR(zc.fecha_inicio, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+       AND TO_CHAR(zc.fecha_inicio, 'YYYY-MM') = TO_CHAR(${HOY_SQL}, 'YYYY-MM')
        ORDER BY zc.fecha_inicio DESC
        LIMIT 5`
     );
@@ -422,7 +422,7 @@ const ingresosMesSalud = await pool.query(
        FROM geronto_cycles gc
        JOIN geronto_participants gp ON gc.participant_id = gp.id
        WHERE gp.activo = true
-       AND TO_CHAR(gc.fecha_inicio, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+       AND TO_CHAR(gc.fecha_inicio, 'YYYY-MM') = TO_CHAR(${HOY_SQL}, 'YYYY-MM')
        ORDER BY gc.fecha_inicio DESC
        LIMIT 5`
     );
@@ -484,7 +484,7 @@ const ingresosMesSalud = await pool.query(
        FROM bloqueos_agenda b
        JOIN users u ON u.id = b.professional_id
        JOIN areas ar ON ar.id = b.area_id
-       WHERE b.fecha = CURRENT_DATE
+       WHERE b.fecha = ${HOY_SQL}
        ${filtroAreaBloqueo}
        ORDER BY b.hora_inicio ASC`,
       paramsArea
@@ -495,7 +495,7 @@ const ingresosMesSalud = await pool.query(
        FROM bloqueos_agenda b
        JOIN users u ON u.id = b.professional_id
        JOIN areas ar ON ar.id = b.area_id
-       WHERE b.fecha = CURRENT_DATE + INTERVAL '1 day'
+       WHERE b.fecha = ${HOY_SQL} + INTERVAL '1 day'
        ${filtroAreaBloqueo}
        ORDER BY b.hora_inicio ASC`,
       paramsArea
@@ -548,11 +548,11 @@ export async function getProgresoAreas(
 
     let filtroFecha = '';
     if (periodo === 'semanal') {
-      filtroFecha = `AND a.fecha >= date_trunc('week', CURRENT_DATE)::date AND a.fecha <= CURRENT_DATE`;
+      filtroFecha = `AND a.fecha >= date_trunc('week', ${HOY_SQL})::date AND a.fecha <= ${HOY_SQL}`;
     } else if (periodo === 'anual') {
-      filtroFecha = `AND a.fecha >= date_trunc('year', CURRENT_DATE)::date AND a.fecha <= CURRENT_DATE`;
+      filtroFecha = `AND a.fecha >= date_trunc('year', ${HOY_SQL})::date AND a.fecha <= ${HOY_SQL}`;
     } else {
-      filtroFecha = `AND a.fecha >= date_trunc('month', CURRENT_DATE)::date AND a.fecha <= CURRENT_DATE`;
+      filtroFecha = `AND a.fecha >= date_trunc('month', ${HOY_SQL})::date AND a.fecha <= ${HOY_SQL}`;
     }
 
     const result = await pool.query(
@@ -599,8 +599,8 @@ export async function getProgresoTemporal(
          FROM appointments a
          JOIN areas ar ON a.area_id = ar.id
          WHERE a.estado = 'confirmada'
-         AND a.fecha >= date_trunc('week', CURRENT_DATE) - INTERVAL '3 weeks'
-         AND a.fecha <= CURRENT_DATE
+         AND a.fecha >= date_trunc('week', ${HOY_SQL}) - INTERVAL '3 weeks'
+         AND a.fecha <= ${HOY_SQL}
          GROUP BY ar.id, ar.nombre, date_trunc('week', a.fecha)
          ORDER BY ar.nombre, periodo_orden ASC`
       );

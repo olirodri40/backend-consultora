@@ -3,6 +3,7 @@ import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
 import { subirArchivoArticulo, eliminarArchivo } from '../services/storage.service';
+import { HOY_SQL } from '../utils/tiempo';
 
 const CATEGORIAS_VALIDAS = ['Fisioterapia', 'Medicina', 'Psicología'];
 
@@ -68,7 +69,7 @@ export async function crearArticulo(
 
     const resultado = await pool.query(
       `INSERT INTO site_articles (titulo, descripcion, contenido, categoria, imagen_url, publicado_en, orden, activo, creado_por)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, CURRENT_DATE), $7, true, $8)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, ${HOY_SQL}), $7, true, $8)
        RETURNING *`,
       [
         titulo,

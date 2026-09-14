@@ -3,7 +3,7 @@ import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
 import { nombreDelDia, mismoDia } from '../utils/dias';
-import { fechaHoy } from '../utils/tiempo';
+import { fechaHoy, HOY_SQL } from '../utils/tiempo';
 
 const DIAS_VALIDOS = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Miércoles', 'Jueves', 'Viernes', 'Sabado', 'Sábado'];
 
@@ -327,7 +327,7 @@ export async function inscribirEnSesionGrupal(req: RequestConUsuario, res: Respo
         (patient_id, professional_id, area_id, fecha, hora, modalidad, sesion, total_sesiones,
          ciclo, estado, servicio_nombre, monto, monto_total, monto_pagado, metodo_pago, estado_pago,
          fecha_pago, notas, duracion_min, created_by)
-       VALUES ($1,$2,$3,$4,$5,'presencial',1,1,$6,'confirmada',$7,$8,$8,$9,'efectivo',$10,CURRENT_DATE,$11,$12,$13)
+       VALUES ($1,$2,$3,$4,$5,'presencial',1,1,$6,'confirmada',$7,$8,$8,$9,'efectivo',$10,${HOY_SQL},$11,$12,$13)
        RETURNING id`,
       [
         patient_id, plantilla.professional_id, plantilla.area_id, fecha, plantilla.hora_inicio,

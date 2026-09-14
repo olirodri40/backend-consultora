@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
+import { HOY_SQL } from '../utils/tiempo';
 
 export async function getActividades(
   req: RequestConUsuario,
@@ -75,7 +76,7 @@ export async function getParticipantesConFiltro(
              FROM geronto_attendance ga
              WHERE ga.participant_id = p.id
                AND ga.cycle_id = c.id
-               AND ga.fecha = CURRENT_DATE
+               AND ga.fecha = ${HOY_SQL}
            ) subq
           ), '{}'::jsonb
         ) as marcado_hoy_por_actividad

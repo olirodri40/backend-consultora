@@ -46,3 +46,18 @@ export function diaDeLaSemanaHoy(fecha: Date = new Date()): string {
   const [anio, mes, dia] = fechaHoy(fecha).split('-').map(Number);
   return DIAS[new Date(Date.UTC(anio, mes - 1, dia)).getUTCDay()];
 }
+
+// --- Equivalentes para SQL ---------------------------------------------------
+//
+// Supabase también corre en UTC, así que CURRENT_DATE y CURRENT_TIME dentro de
+// las consultas tienen el mismo problema: entre las 20:00 y medianoche de
+// Bolivia ya devuelven el día siguiente. Estas constantes se interpolan en los
+// SQL en lugar de CURRENT_DATE / CURRENT_TIME.
+//
+// AHORA_SQL es un timestamp SIN zona con la hora de pared boliviana, que es
+// justo el formato en que están guardadas las columnas `fecha` y `hora` de las
+// citas, así que se pueden comparar directamente.
+
+export const AHORA_SQL = `(NOW() AT TIME ZONE '${ZONA_NEGOCIO}')`;
+export const HOY_SQL = `${AHORA_SQL}::date`;
+export const HORA_ACTUAL_SQL = `${AHORA_SQL}::time`;

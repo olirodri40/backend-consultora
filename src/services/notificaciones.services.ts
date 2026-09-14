@@ -1,5 +1,6 @@
 import pool from '../db/pool';
 import webpush from '../db/webpush';
+import { AHORA_SQL, HOY_SQL, HORA_ACTUAL_SQL } from '../utils/tiempo';
 
 // ─────────────────────────────────────────────
 // Helper interno: busca destinatarios por área/rol
@@ -82,11 +83,11 @@ export async function enviarRecordatorios3h() {
        FROM appointments a
        JOIN patients p ON a.patient_id = p.id
        JOIN areas ar   ON a.area_id    = ar.id
-       WHERE a.fecha = CURRENT_DATE
+       WHERE a.fecha = ${HOY_SQL}
        AND a.estado = 'confirmada'
-       AND a.hora::time > CURRENT_TIME
-       AND a.hora::time <= (CURRENT_TIME + INTERVAL '3 hours 10 minutes')
-       AND a.hora::time > (CURRENT_TIME + INTERVAL '2 hours 50 minutes')
+       AND a.hora::time > ${HORA_ACTUAL_SQL}
+       AND a.hora::time <= (${HORA_ACTUAL_SQL} + INTERVAL '3 hours 10 minutes')
+       AND a.hora::time > (${HORA_ACTUAL_SQL} + INTERVAL '2 hours 50 minutes')
        AND NOT EXISTS (
          SELECT 1 FROM notificaciones_enviadas ne
          WHERE ne.appointment_id = a.id AND ne.tipo = 'recordatorio_3h'
@@ -128,8 +129,8 @@ export async function enviarRecordatorios24h() {
        JOIN patients p ON a.patient_id = p.id
        JOIN areas ar   ON a.area_id    = ar.id
        WHERE a.estado = 'confirmada'
-       AND (a.fecha + a.hora) >= (NOW() + INTERVAL '23 hours 50 minutes')
-       AND (a.fecha + a.hora) <= (NOW() + INTERVAL '24 hours 10 minutes')
+       AND (a.fecha + a.hora) >= (${AHORA_SQL} + INTERVAL '23 hours 50 minutes')
+       AND (a.fecha + a.hora) <= (${AHORA_SQL} + INTERVAL '24 hours 10 minutes')
        AND NOT EXISTS (
          SELECT 1 FROM notificaciones_enviadas ne
          WHERE ne.appointment_id = a.id AND ne.tipo = 'recordatorio_24h'
