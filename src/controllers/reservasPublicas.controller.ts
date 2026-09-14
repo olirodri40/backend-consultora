@@ -3,6 +3,7 @@ import pool from '../db/pool';
 import { RequestConUsuario } from '../middlewares/auth';
 import { registrarAudit } from '../db/audit';
 import { variantesDia } from '../utils/dias';
+import { notificarNuevaReservaWeb } from '../services/notificaciones.services';
 
 type FilaDisponibilidad = {
   user_id: number;
@@ -275,7 +276,10 @@ export async function crearReservaPublica(req: RequestConUsuario, res: Response)
     }
 
     const servicioRes = await pool.query(
-      `SELECT id, area_id, duracion_min FROM services WHERE id = $1 AND activo = true AND visible_publico = true`,
+      `SELECT s.id, s.area_id, s.duracion_min, s.nombre, ar.nombre as area_nombre
+       FROM services s
+       JOIN areas ar ON ar.id = s.area_id
+       WHERE s.id = $1 AND s.activo = true AND s.visible_publico = true`,
       [servicio_id]
     );
     if (servicioRes.rows.length === 0) {
@@ -352,6 +356,17 @@ export async function crearReservaPublica(req: RequestConUsuario, res: Response)
         notas || null,
       ]
     );
+
+    // Aviso a recepción/administración de que hay una reserva esperando
+    // confirmación. Si algo falla acá no se rompe la reserva del visitante:
+    // la solicitud ya quedó guardada y visible en el panel igual.
+    notificarNuevaReservaWeb(
+      paciente_nombre,
+      servicioRes.rows[0].area_nombre,
+      servicioRes.rows[0].nombre,
+      String(fecha),
+      horaNormalizada
+    ).catch((err) => console.error('Error al notificar reserva web:', err));
 
     res.status(201).json({
       ok: true,

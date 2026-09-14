@@ -32,15 +32,21 @@ async function notificarUsuarios(areaNombre: string, titulo: string, cuerpo: str
     [areaNombre, profesionalId ?? null]
   );
 
-  for (const u of usuariosDestino.rows) {
+  await entregarA(usuariosDestino.rows.map((u) => u.id), titulo, cuerpo, url);
+}
+
+// Guarda la notificación en la app (campanita) y manda el push a cada
+// dispositivo suscrito de esos usuarios.
+async function entregarA(userIds: number[], titulo: string, cuerpo: string, url: string) {
+  for (const userId of userIds) {
     await pool.query(
       `INSERT INTO notificaciones (user_id, titulo, cuerpo, url) VALUES ($1, $2, $3, $4)`,
-      [u.id, titulo, cuerpo, url]
+      [userId, titulo, cuerpo, url]
     );
 
     const subs = await pool.query(
       `SELECT * FROM push_subscriptions WHERE user_id = $1`,
-      [u.id]
+      [userId]
     );
     for (const sub of subs.rows) {
       await enviarPush(sub, { title: titulo, body: cuerpo, url });
@@ -185,6 +191,39 @@ export async function notificarNuevaCita(
     await notificarUsuarios(areaNombre, titulo, cuerpo, '/agenda', profesionalId);
   } catch (error) {
     console.error('Error al notificar nueva cita:', error);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Notificación: alguien reservó desde el sitio web público
+// ─────────────────────────────────────────────
+// Solo se avisa a quienes pueden gestionar esa reserva (asignarle profesional
+// y confirmarla): administrador, supervisor y recepcionista. A los
+// profesionales NO les llega — todavía no hay un profesional asignado, y
+// cuando se confirme ya recibirán la notificación normal de nueva cita.
+export async function notificarNuevaReservaWeb(
+  pacienteNombre: string,
+  areaNombre: string,
+  servicioNombre: string | null,
+  fecha: string,
+  hora: string
+) {
+  try {
+    const staff = await pool.query(
+      `SELECT u.id
+       FROM users u
+       JOIN roles r ON r.id = u.role_id
+       WHERE r.nombre IN ('administrador', 'supervisor', 'recepcionista')
+         AND u.activo IS NOT FALSE`
+    );
+
+    const titulo = 'Nueva reserva del sitio web';
+    const partes = [pacienteNombre, areaNombre, servicioNombre, `${fecha} ${hora?.slice(0, 5)}`].filter(Boolean);
+    const cuerpo = `${partes.join(' · ')} · Pendiente de confirmar`;
+
+    await entregarA(staff.rows.map((u) => u.id), titulo, cuerpo, '/agenda');
+  } catch (error) {
+    console.error('Error al notificar nueva reserva del sitio web:', error);
   }
 }
 
