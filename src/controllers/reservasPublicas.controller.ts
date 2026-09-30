@@ -427,7 +427,11 @@ export async function getCandidatosReserva(req: RequestConUsuario, res: Response
       return;
     }
     const reserva = reservaRes.rows[0];
-    const horaInicio = aMinutos(reserva.hora);
+    // Permite consultar disponibilidad para una fecha/hora ALTERNATIVA (cuando el
+    // horario original quedó ocupado y hay que mover la cita al confirmarla).
+    const fechaUsar = (req.query.fecha as string) || reserva.fecha;
+    const horaUsar = (req.query.hora as string) || reserva.hora;
+    const horaInicio = aMinutos(horaUsar);
 
     // Sesión grupal: el profesional ya está fijo en la plantilla, no hay que
     // buscar candidatos por disponibilidad — solo confirmar que hay cupo.
@@ -458,38 +462,42 @@ export async function getCandidatosReserva(req: RequestConUsuario, res: Response
     const duracion = servicioRes.rows[0]?.duracion_min || 60;
     const horaFinReserva = horaInicio + duracion;
 
-    const disponibilidad = await getDisponibilidadServicio(reserva.servicio_id, reserva.area_id, reserva.fecha);
+    const disponibilidad = await getDisponibilidadServicio(reserva.servicio_id, reserva.area_id, fechaUsar);
     const candidatosIds = disponibilidad
       .filter((d) => {
         const inicioJornada = aMinutos(d.hora_inicio);
         const finJornada = aMinutos(d.hora_fin);
         const dentroDeJornada = horaInicio >= inicioJornada && horaFinReserva <= finJornada;
-        // La hora de la reserva tiene que caer justo en uno de los slots del
-        // profesional (cada 30, 60min, etc.) — si su horario es cada 60min y
-        // la reserva es a las 09:30, ese profesional no puede atenderla.
+        // La hora tiene que caer justo en uno de los slots del profesional
+        // (cada 30, 60min, etc.) — si su horario es cada 60min y la hora es a
+        // las 09:30, ese profesional no puede atenderla.
         const paso = d.slot_minutos || 60;
         const encajaEnSuGrilla = (horaInicio - inicioJornada) % paso === 0;
         return dentroDeJornada && encajaEnSuGrilla;
       })
       .map((d) => d.user_id);
 
-    if (candidatosIds.length === 0) {
-      res.json({ ok: true, candidatos: [] });
-      return;
+    // Horarios alternativos de ese día que tienen al menos un profesional libre,
+    // para poder mover la cita a otra hora si la original ya está ocupada.
+    const contador = await contarCuposPorHora(reserva.servicio_id, reserva.area_id, fechaUsar, duracion);
+    const horariosDisponibles = Object.keys(contador)
+      .filter((h) => contador[h] > 0)
+      .sort();
+
+    let candidatos: { id: number; nombre: string; disponible: boolean }[] = [];
+    if (candidatosIds.length > 0) {
+      const ocupadosPorProfesional = await getOcupadosPorProfesional(candidatosIds, fechaUsar);
+      const usuariosRes = await pool.query(`SELECT id, nombre FROM users WHERE id = ANY($1::int[]) ORDER BY nombre`, [
+        candidatosIds,
+      ]);
+      candidatos = usuariosRes.rows.map((u) => {
+        const ocupados = ocupadosPorProfesional.get(u.id) || [];
+        const disponible = !ocupados.some((o) => horaInicio < o.fin && horaFinReserva > o.inicio);
+        return { id: u.id, nombre: u.nombre, disponible };
+      });
     }
 
-    const ocupadosPorProfesional = await getOcupadosPorProfesional(candidatosIds, reserva.fecha);
-
-    const usuariosRes = await pool.query(`SELECT id, nombre FROM users WHERE id = ANY($1::int[]) ORDER BY nombre`, [
-      candidatosIds,
-    ]);
-    const candidatos = usuariosRes.rows.map((u) => {
-      const ocupados = ocupadosPorProfesional.get(u.id) || [];
-      const disponible = !ocupados.some((o) => horaInicio < o.fin && horaFinReserva > o.inicio);
-      return { id: u.id, nombre: u.nombre, disponible };
-    });
-
-    res.json({ ok: true, candidatos });
+    res.json({ ok: true, candidatos, horariosDisponibles });
   } catch (error) {
     console.error('Error al obtener candidatos de la reserva:', error);
     res.status(500).json({ ok: false, mensaje: 'Error al obtener los profesionales disponibles' });
@@ -500,7 +508,7 @@ export async function getCandidatosReserva(req: RequestConUsuario, res: Response
 export async function confirmarReservaPublica(req: RequestConUsuario, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const { professional_id } = req.body;
+    const { professional_id, fecha, hora } = req.body;
 
     if (!professional_id) {
       res.status(400).json({ ok: false, mensaje: 'Debes seleccionar un profesional' });
@@ -523,7 +531,11 @@ export async function confirmarReservaPublica(req: RequestConUsuario, res: Respo
     ]);
     const servicio = servicioRes.rows[0];
     const duracion = servicio?.duracion_min || 60;
-    const horaInicio = aMinutos(reserva.hora);
+    // Se puede confirmar en una fecha/hora distinta a la pedida (cuando la
+    // original quedó ocupada). Si no se envían, se usan las de la reserva.
+    const fechaUsar = fecha || reserva.fecha;
+    const horaUsar = hora || reserva.hora;
+    const horaInicio = aMinutos(horaUsar);
     const horaFin = horaInicio + duracion;
 
     const sesionGrupal = await getSesionGrupalPublica(reserva.servicio_id);
@@ -543,7 +555,24 @@ export async function confirmarReservaPublica(req: RequestConUsuario, res: Respo
         return;
       }
     } else {
-      const ocupadosDelProfesional = (await getOcupadosPorProfesional([professional_id], reserva.fecha)).get(
+      // El profesional debe atender ese servicio ese día, y la hora elegida debe
+      // caer dentro de su jornada y encajar en su grilla de slots.
+      const disponibilidad = await getDisponibilidadServicio(reserva.servicio_id, reserva.area_id, fechaUsar);
+      const prof = disponibilidad.find((d) => d.user_id === Number(professional_id));
+      if (!prof) {
+        res.status(409).json({ ok: false, mensaje: 'Ese profesional no atiende ese servicio ese día' });
+        return;
+      }
+      const inicioJornada = aMinutos(prof.hora_inicio);
+      const finJornada = aMinutos(prof.hora_fin);
+      const paso = prof.slot_minutos || 60;
+      const dentroDeJornada =
+        horaInicio >= inicioJornada && horaFin <= finJornada && (horaInicio - inicioJornada) % paso === 0;
+      if (!dentroDeJornada) {
+        res.status(409).json({ ok: false, mensaje: 'El horario elegido no está dentro de la jornada del profesional' });
+        return;
+      }
+      const ocupadosDelProfesional = (await getOcupadosPorProfesional([professional_id], fechaUsar)).get(
         Number(professional_id)
       ) || [];
       const seSolapa = ocupadosDelProfesional.some((o) => horaInicio < o.fin && horaFin > o.inicio);
@@ -604,8 +633,8 @@ export async function confirmarReservaPublica(req: RequestConUsuario, res: Respo
         patient_id,
         professional_id,
         reserva.area_id,
-        reserva.fecha,
-        reserva.hora,
+        fechaUsar,
+        horaUsar,
         numeroCiclo,
         servicio?.nombre || null,
         montoFinal || null,
@@ -620,9 +649,9 @@ export async function confirmarReservaPublica(req: RequestConUsuario, res: Respo
     await pool.query(
       `UPDATE reservas_publicas SET
         estado = 'confirmada', professional_id = $1, appointment_id = $2,
-        confirmado_por = $3, confirmado_at = NOW()
-       WHERE id = $4`,
-      [professional_id, nuevaCita.rows[0].id, req.usuario!.id, id]
+        fecha = $3, hora = $4, confirmado_por = $5, confirmado_at = NOW()
+       WHERE id = $6`,
+      [professional_id, nuevaCita.rows[0].id, fechaUsar, horaUsar, req.usuario!.id, id]
     );
 
     await registrarAudit({
