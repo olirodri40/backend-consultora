@@ -73,6 +73,37 @@ export async function crearServicio(
 
     const nuevoId = resultado.rows[0].id;
 
+    // Al crear un servicio nuevo en un área, asignarlo automáticamente a los
+    // profesionales que YA tenían TODOS los servicios de esa área (es decir, que
+    // tenían activada la opción "Todos los servicios de <área>"). Así:
+    //   - No se les "desmarca" ese check al aparecer un servicio que no tienen.
+    //   - El servicio nuevo se ve de inmediato en la agenda de esos profesionales
+    //     (la agenda filtra por los servicios asignados al profesional).
+    // A los profesionales que solo tenían ALGUNOS servicios del área no se les toca.
+    await pool.query(
+      `INSERT INTO user_servicios (user_id, servicio_id)
+       SELECT ua.user_id, $1
+       FROM user_areas ua
+       WHERE ua.area_id = $2
+         -- tenía al menos un servicio del área (equivale a length > 0)
+         AND EXISTS (
+           SELECT 1 FROM user_servicios us
+           JOIN services s ON s.id = us.servicio_id
+           WHERE us.user_id = ua.user_id AND s.area_id = $2
+         )
+         -- y no le faltaba ningún otro servicio del área (equivale a "todos")
+         AND NOT EXISTS (
+           SELECT 1 FROM services s
+           WHERE s.area_id = $2 AND s.id <> $1
+             AND NOT EXISTS (
+               SELECT 1 FROM user_servicios us
+               WHERE us.user_id = ua.user_id AND us.servicio_id = s.id
+             )
+         )
+       ON CONFLICT DO NOTHING`,
+      [nuevoId, area_id]
+    );
+
     await registrarAudit({
       tabla: 'services',
       registro_id: nuevoId,

@@ -104,37 +104,41 @@ async function guardarHorariosAutomaticos(
 ): Promise<void> {
   const horariosAAgregar: any[] = [];
 
-  // 1. Zumba
+  // IDs de las áreas cuyos horarios se generan AUTOMÁTICAMENTE (Zumba y
+  // Gerontología). Solo estas áreas se reconstruyen aquí; los horarios
+  // manuales de otras áreas (Fisioterapia, Psicología, Medicina...) NO se tocan.
   const areaZumba = await pool.query(
     'SELECT id FROM areas WHERE LOWER(nombre) = LOWER($1)',
     ['Zumba']
   );
-  
-  if (areaZumba.rows.length > 0 && areasIds.includes(areaZumba.rows[0].id)) {
+  const areaGeronto = await pool.query(
+    'SELECT id FROM areas WHERE LOWER(nombre) = LOWER($1)',
+    ['Gerontologia']
+  );
+  const zumbaId: number | null = areaZumba.rows[0]?.id ?? null;
+  const gerontoId: number | null = areaGeronto.rows[0]?.id ?? null;
+
+  // 1. Zumba
+  if (zumbaId !== null && areasIds.includes(zumbaId)) {
     const zumbaHorarios = await pool.query(
-      `SELECT dia, hora_inicio, hora_fin, slot_minutos 
-       FROM zumba_horarios 
+      `SELECT dia, hora_inicio, hora_fin, slot_minutos
+       FROM zumba_horarios
        WHERE activo = true`
     );
-    
+
     for (const h of zumbaHorarios.rows) {
       horariosAAgregar.push({
         dia: h.dia,
         hora_inicio: h.hora_inicio,
         hora_fin: h.hora_fin,
         slot_minutos: h.slot_minutos || 60,
-        area_id: areaZumba.rows[0].id
+        area_id: zumbaId
       });
     }
   }
 
   // 2. Gerontología
-  const areaGeronto = await pool.query(
-    'SELECT id FROM areas WHERE LOWER(nombre) = LOWER($1)',
-    ['Gerontologia']
-  );
-
-  if (areaGeronto.rows.length > 0 && areasIds.includes(areaGeronto.rows[0].id)) {
+  if (gerontoId !== null && areasIds.includes(gerontoId)) {
     if (actividadesGerontoIds && actividadesGerontoIds.length > 0) {
       const gerontoHorarios = await pool.query(
         `SELECT dia, hora_inicio, hora_fin
@@ -149,24 +153,32 @@ async function guardarHorariosAutomaticos(
           hora_inicio: h.hora_inicio,
           hora_fin: h.hora_fin,
           slot_minutos: 60,
-          area_id: areaGeronto.rows[0].id
+          area_id: gerontoId
         });
       }
     }
   }
 
-  // 3. Guardar horarios
-  if (horariosAAgregar.length > 0) {
-    // Eliminar horarios existentes para evitar duplicados
-    await pool.query('DELETE FROM availability WHERE user_id = $1', [userId]);
+  // 3. Reemplazar SOLO los horarios de las áreas automáticas (Zumba/Gerontología).
+  //    Antes se hacía `DELETE ... WHERE user_id = $1` (todos), lo que borraba los
+  //    horarios manuales de Fisioterapia/Psicología/etc. al guardar cambios de un
+  //    profesional que además tenía Gerontología o Zumba. Ahora se acota por área.
+  const areasAutomaticas = [zumbaId, gerontoId].filter(
+    (x): x is number => x !== null
+  );
+  if (areasAutomaticas.length > 0) {
+    await pool.query(
+      'DELETE FROM availability WHERE user_id = $1 AND area_id = ANY($2::int[])',
+      [userId, areasAutomaticas]
+    );
+  }
 
-    for (const h of horariosAAgregar) {
-      await pool.query(
-        `INSERT INTO availability (user_id, area_id, dia, hora_inicio, hora_fin, slot_minutos)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userId, h.area_id, h.dia, h.hora_inicio, h.hora_fin, h.slot_minutos]
-      );
-    }
+  for (const h of horariosAAgregar) {
+    await pool.query(
+      `INSERT INTO availability (user_id, area_id, dia, hora_inicio, hora_fin, slot_minutos)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, h.area_id, h.dia, h.hora_inicio, h.hora_fin, h.slot_minutos]
+    );
   }
 }
 // ✅ Función para eliminar horarios de áreas que el usuario ya no tiene
